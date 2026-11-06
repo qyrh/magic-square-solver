@@ -90,6 +90,12 @@
   .frac .num { padding: 0 4px 1px; border-bottom: 1.5px solid currentColor; }
   .frac .den { padding: 1px 4px 0; }
   .fsign { margin-right: 2px; font-size: 1.05em; }
+  /* 填写框内的立体分数覆盖层（输入框本身无法排版上下分式） */
+  table.inp .frac-ov { position: absolute; left: 3px; top: 3px; right: 3px; bottom: 3px; display: none; align-items: center; justify-content: center; pointer-events: none; font-size: 15px; color: #1f2328; background: #fbfcfe; border-radius: 4px; }
+  table.inp.small .frac-ov { font-size: 13px; }
+  table.inp td.show-frac .frac-ov { display: flex; }
+  table.inp td.show-frac input { color: transparent; }
+  table.inp td.show-frac.derived-cell .frac-ov { color: var(--derived); font-weight: 600; background: #ecf6ef; font-style: italic; }
 
   table.data { border-collapse: collapse; margin: 8px 0; font-size: 13.5px; }
   table.data th, table.data td { border: 1px solid #ccd3db; padding: 4px 10px; text-align: left; }
@@ -143,7 +149,7 @@
 <div class="wrap">
   <header class="app no-print">
     <h1>幻方求解器</h1>
-    <p>任意阶（1–8）· 整数 / 分数 / 小数（精确有理数运算）· 输入即出数：凡能确定的格子全部推出，按“最少已知数优先”给出填数顺序与最简证明 · 点击推出的数可查看依据 · 分页 / 整页 / 打印 PDF / 导出 DOCX</p>
+    <p>3–8 阶 · 整数 / 分数 / 小数（精确有理数运算）· 输入即出数：凡能确定的格子全部推出 · 点“求解”给出逐步证明（红/蓝重合抵消讲法）· 点击推出的数可查看依据 · 分页 / 整页 / 打印 PDF / 导出 DOCX</p>
   </header>
 
   <section class="card no-print" id="inputCard">
@@ -151,7 +157,7 @@
     <div class="controls">
       <label>阶数 n =
         <select id="selN">
-          <option>1</option><option>2</option><option selected>3</option><option>4</option>
+          <option selected>3</option><option>4</option>
           <option>5</option><option>6</option><option>7</option><option>8</option>
         </select>
       </label>
@@ -217,9 +223,9 @@
   </section>
 </div>
 
-<script src="magic-core.js?v=20"></script>
-<script src="render.js?v=20"></script>
-<script src="docx.js?v=20"></script>
-<script src="app.js?v=20"></script>
+<script src="magic-core.js?v=21"></script>
+<script src="render.js?v=21"></script>
+<script src="docx.js?v=21"></script>
+<script src="app.js?v=21"></script>
 </body>
 </html>
