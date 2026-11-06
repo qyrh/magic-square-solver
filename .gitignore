@@ -3,4 +3,6 @@
 sample-output.docx
 sample-frac.docx
 canned-results.json
+canned-e2e.js
+verify-docx/
 __pycache__/
