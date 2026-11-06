@@ -114,7 +114,7 @@
     ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(function (s) {
       return '<w:' + s + ' w:val="single" w:sz="4" w:space="0" w:color="999999"/>';
     }).join('') + '</w:tblBorders>';
-  const GRID_FILL = { given: 'DCE9F8', derived: 'DFF0E3', new: 'FFF3C4', diff: 'FBE2E2' };
+  const GRID_FILL = { given: 'DCE9F8', derived: 'DFF0E3', new: 'FFF3C4', diff: 'FBE2E2', red: 'FBDADA', blue: 'DCE8FA' };
   const GRID_COLOR = { letter: '808080', dot: 'C0C0C0', unknown: '808080' };
 
   /* 分数文本 → {sign, num, den}；非分数返回 null */
@@ -145,7 +145,7 @@
         const cell = block.cells[r * n + c] || { text: '', kind: 'dot' };
         let shd = GRID_FILL[cell.kind] ? '<w:shd w:val="clear" w:fill="' + GRID_FILL[cell.kind] + '"/>' : '';
         const rpr = (GRID_COLOR[cell.kind] ? '<w:color w:val="' + GRID_COLOR[cell.kind] + '"/>' : '') +
-          (cell.kind === 'letter' || cell.kind === 'unknown' ? '<w:i/>' : '') + SZ(maxM >= 5 ? 16 : 20);
+          (cell.kind === 'letter' || cell.kind === 'unknown' || cell.kind === 'red' || cell.kind === 'blue' ? '<w:i/>' : '') + (cell.kind === 'red' || cell.kind === 'blue' ? '<w:b/>' : '') + SZ(maxM >= 5 ? 16 : 20);
         let inner;
         const f = (cell.kind === 'given' || cell.kind === 'derived' || cell.kind === 'new') ? parseFrac(cell.text) : null;
         if (f) {
@@ -198,19 +198,29 @@
     return xml;
   }
 
-  function blocksToBodyXml(pages) {
+  function renderBlocks(blocks) {
     let body = '';
-    pages.forEach(function (blocks, pi) {
-      if (pi > 0) body += '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
-      for (const b of blocks) {
+    for (const b of blocks) {
         if (b.t === 'title') body += para('<w:r><w:rPr><w:b/>' + SZ(34) + '</w:rPr><w:t xml:space="preserve">' + esc(b.text) + '</w:t></w:r>', { spacing: 160 });
         else if (b.t === 'h2') body += para('<w:r><w:rPr><w:b/>' + SZ(28) + '</w:rPr><w:t xml:space="preserve">' + esc(b.text) + '</w:t></w:r>', { h: 1, spacing: 160 });
         else if (b.t === 'h3') body += para('<w:r><w:rPr><w:b/>' + SZ(23) + '</w:rPr><w:t xml:space="preserve">' + esc(b.text) + '</w:t></w:r>', { h: 2, spacing: 140 });
         else if (b.t === 'p') body += para(b.segs.map(function (s) { return runXml(s, SZ(21)); }).join(''));
         else if (b.t === 'grid') body += gridXml(b);
         else if (b.t === 'table') body += tableXml(b);
+        else if (b.t === 'proof') {
+          body += para('<w:r><w:rPr><w:b/>' + SZ(23) + '</w:rPr><w:t xml:space="preserve">证明（对任意 ' + esc(b.title || '幻方') + '成立）</w:t></w:r>', { h: 2, spacing: 140 });
+          body += renderBlocks(b.blocks);
+        }
         else if (b.t === 'pagebreak') { /* 已按页分隔 */ }
-      }
+    }
+    return body;
+  }
+
+  function blocksToBodyXml(pages) {
+    let body = '';
+    pages.forEach(function (blocks, pi) {
+      if (pi > 0) body += '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+      body += renderBlocks(blocks);
     });
     return body;
   }
