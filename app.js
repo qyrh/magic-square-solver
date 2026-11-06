@@ -275,6 +275,41 @@
     setGrid(vals);
   });
 
+  /* ---------------- 值域限定 ---------------- */
+  function currentDomain() {
+    const kind = $('selDomain').value;
+    if (kind === 'classic') return { kind: 'classic' };
+    if (kind === 'integer') return { kind: 'integer' };
+    if (kind === 'set') {
+      const raw = $('customSet').value.trim();
+      const toks = raw.split(/[\s,，;；]+/).filter(function (x) { return x !== ''; });
+      const vals = [];
+      for (const t of toks) {
+        try { vals.push(MagicCore.parseNumberString(t)); }
+        catch (e) { return { kind: 'set', error: '限定数字里有无法识别的数："' + t + '"' }; }
+      }
+      return { kind: 'set', values: vals };
+    }
+    return { kind: 'none' };
+  }
+  function syncDomainUI() {
+    const kind = $('selDomain').value;
+    $('setBox').style.display = kind === 'set' ? '' : 'none';
+    const n = state.n;
+    if (kind === 'set') {
+      $('setHint').textContent = '需要恰好 n² = ' + (n * n) + ' 个数（每个用一次）；可用分数/负数，如 -3 0.5 2/3 …';
+    }
+    if (kind === 'classic') {
+      $('customSet').value = Array.from({ length: n * n }, function (_, i) { return String(i + 1); }).join(' ');
+    }
+  }
+  $('selDomain').addEventListener('change', function () {
+    syncDomainUI();
+    scheduleAuto(0);
+  });
+  $('btnSetApply').addEventListener('click', function () { scheduleAuto(0); });
+  $('customSet').addEventListener('input', function () { scheduleAuto(); });
+
   /* ---------------- 求解 ---------------- */
   async function solve(opts) {
     opts = opts || {};
@@ -283,6 +318,8 @@
     const tok = state.token;
 
     const n = state.n;
+    const dom = currentDomain();
+    if (dom.error) { $('inputErr').textContent = dom.error; return; }
     const given = new Map();
     const errs = [];
     $('gridBox').querySelectorAll('input').forEach(function (inp) {
@@ -305,7 +342,10 @@
     btn.disabled = true; btn.textContent = '求解中…';
     try {
       const result = await MagicCore.solveMagicAsync(n, given, {
-        onProgress: function (p) { btn.textContent = '求解中…（剩 ' + p.pending + ' 个待定）'; }
+        domain: dom,
+        onProgress: function (p) {
+          btn.textContent = p.phase === 'csp' ? '求解中…（穷举限定范围）' : ('求解中…' + (p.pending ? '（剩 ' + p.pending + ' 个待定）' : ''));
+        }
       });
       if (tok !== state.token) { btn.disabled = false; btn.textContent = '求 解'; return; }
       btn.disabled = false; btn.textContent = '求 解';
@@ -369,6 +409,13 @@
         result.undeterminedCells.length + ' 格在现有已知下无法唯一确定（剩 ' + result.dimFree + ' 个自由参数）。';
     }
     html += result.S ? '　幻和 S = <b>' + result.S.valueStr + '</b>。' : '　幻和 S 尚未确定。';
+    if (result.domain && result.domain.kind !== 'none') {
+      html += '　限定：<b>' + result.domain.note + '</b>';
+      if (result.csp && result.csp.ok && result.csp.exhaustive) {
+        html += '；限定范围内共 <b>' + result.csp.count + '</b> 种合法填法（已穷尽）';
+      }
+    }
+    if (result.integer && result.integer.feasible === true) html += '；已找到整数填法 ✓';
     html += '<br><span class="dim">点 <b>“求 解”</b> 查看逐步最简证明（含字母推导与画块示意，证明默认折叠）；双击绿色数字可查看它的推导依据。</span>';
     bar.innerHTML = html;
     bar.style.display = '';
@@ -593,5 +640,6 @@
 
   /* ---------------- 初始化 ---------------- */
   buildInputs(3);
+  syncDomainUI();
   updateUndoButtons();
 })();
