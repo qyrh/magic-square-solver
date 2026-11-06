@@ -1,0 +1,6 @@
+# 本地安全扫描目录与测试临时产物
+.mimosa/
+sample-output.docx
+sample-frac.docx
+canned-results.json
+__pycache__/
