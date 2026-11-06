@@ -207,6 +207,13 @@
         else if (b.t === 'p') body += para(b.segs.map(function (s) { return runXml(s, SZ(21)); }).join(''));
         else if (b.t === 'grid') body += gridXml(b);
         else if (b.t === 'table') body += tableXml(b);
+        else if (b.t === 'examples') {
+          // 示例填法：DOCX 中完整展开（每条一张网格图；网页端才是折叠胶囊）
+          body += para('<w:r><w:rPr><w:b/>' + SZ(23) + '</w:rPr><w:t xml:space="preserve">示例</w:t></w:r>', { h: 2, spacing: 140 });
+          for (const it of b.items) {
+            if (it.grid) body += gridXml(it.grid);
+          }
+        }
         else if (b.t === 'proof') {
           body += para('<w:r><w:rPr><w:b/>' + SZ(23) + '</w:rPr><w:t xml:space="preserve">证明（对任意 ' + esc(b.title || '幻方') + '成立）</w:t></w:r>', { h: 2, spacing: 140 });
           body += renderBlocks(b.blocks);
