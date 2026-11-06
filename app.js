@@ -57,6 +57,7 @@
       inp.classList.remove('bad');
       inp.classList.toggle('derived-val', !!state.grid.derived[i]);
     });
+    inputsUpdateFrac();
   }
   /* 把“能确定的数”回填到填写框；不再可定的自动清除 */
   function autofillDerived(result) {
@@ -80,6 +81,7 @@
         inp.classList.remove('derived-val');
       }
     }
+    inputsUpdateFrac();
   }
   function clearAllDerived() {
     const inputs = $('gridBox').querySelectorAll('input');
@@ -91,6 +93,7 @@
         inputs[i].classList.remove('derived-val');
       }
     }
+    inputsUpdateFrac();
   }
 
   /* ---------------- 输入表格（正方形格子） ---------------- */
@@ -139,8 +142,12 @@
             state.grid.derived[idx] = false;
             this.classList.remove('derived-val');
           }
+          inputsUpdateFrac();
           scheduleAuto();
         });
+        // 聚焦时显示原文本便于编辑，失焦后恢复立体分式
+        inp.addEventListener('focus', function () { inputsUpdateFrac(); });
+        inp.addEventListener('blur', function () { inputsUpdateFrac(); });
         // 双击自动回填的数 → 查看该数的推导证明
         inp.addEventListener('dblclick', function () {
           const idx = Number(this.dataset.idx);
@@ -149,16 +156,41 @@
           if (fc && fc.source != null) openStepModal(fc.source);
         });
         td.appendChild(lab); td.appendChild(inp);
+        const ov = document.createElement('span');
+        ov.className = 'frac-ov';
+        td.appendChild(ov);
         tr.appendChild(td);
       }
       tb.appendChild(tr);
     }
     box.appendChild(tb);
+    // 初始化覆盖层状态
+    inputsUpdateFrac(box);
     function moveFocus(r, c) {
       if (r < 0 || c < 0 || r >= n || c >= n) return;
       const el2 = box.querySelector('input[data-idx="' + (r * n + c) + '"]');
       if (el2) el2.focus();
     }
+  }
+
+  /* 填写框：值为分数且未聚焦时，用上下分式覆盖显示（输入框本身排不了立体分数） */
+  function inputsUpdateFrac(box) {
+    (box || $('gridBox')).querySelectorAll('input').forEach(function (inp) {
+      const td = inp.parentNode;
+      const ov = td.querySelector('.frac-ov');
+      const raw = inp.value.trim();
+      const m = /^(-?)(\d+)\/(\d+)$/.exec(raw);
+      const focused = document.activeElement === inp;
+      if (m && !focused) {
+        const sign = m[1] ? '<span class="fsign">−</span>' : '';
+        ov.innerHTML = sign + '<span class="frac"><span class="num">' + m[2] + '</span><span class="den">' + m[3] + '</span></span>';
+        td.classList.add('show-frac');
+      } else {
+        td.classList.remove('show-frac');
+        ov.innerHTML = '';
+      }
+      td.classList.toggle('derived-cell', inp.classList.contains('derived-val'));
+    });
   }
 
   function setGrid(values) { // 用户动作（预设/批量/清空后调用）
@@ -431,9 +463,7 @@
   }
   function renderSegs(container, segs) {
     for (const s of segs) {
-      const span = el('span', s.cls || '', s.text);
-      if (s.b) span.style.fontWeight = '700';
-      container.appendChild(span);
+      renderTextWithFrac(container, s.text, s.cls, s.b);
     }
   }
 
@@ -443,6 +473,31 @@
     if (!m) return null;
     const sign = m[1] ? '<span class="fsign">−</span>' : '';
     return sign + '<span class="frac"><span class="num">' + m[2] + '</span><span class="den">' + m[3] + '</span></span>';
+  }
+  /* 文本中的分数（如 "S = 33/4"）也渲染成上下分式 */
+  function renderTextWithFrac(container, text, cls, bold) {
+    const re = /(-?\d+)\/(\d+)/g;
+    let last = 0, m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) {
+        const span = el('span', cls || '', text.slice(last, m.index));
+        if (bold) span.style.fontWeight = '700';
+        container.appendChild(span);
+      }
+      const sign = m[1][0] === '-' ? '<span class="fsign">−</span>' : '';
+      const num = m[1].replace('-', '');
+      const wrap = el('span', 'fracwrap');
+      wrap.innerHTML = sign + '<span class="frac"><span class="num">' + num + '</span><span class="den">' + m[2] + '</span></span>';
+      if (bold) wrap.style.fontWeight = '700';
+      if (cls) wrap.classList.add(cls);
+      container.appendChild(wrap);
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) {
+      const span = el('span', cls || '', text.slice(last));
+      if (bold) span.style.fontWeight = '700';
+      container.appendChild(span);
+    }
   }
   function cellMetric(t) {
     const m = /^(-?)(\d+)\/(\d+)$/.exec(t);
