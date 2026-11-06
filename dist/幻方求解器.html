@@ -131,12 +131,14 @@
   #quickBar { background: #fff; border: 1px solid #bfe3c8; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14.5px; }
   #quickBar .dim { color: var(--dim); font-size: 13px; }
 
-  /* ---------- 示例折叠（总结页）：默认只有“示例”两字胶囊 ---------- */
+  /* ---------- 示例折叠（总结页）：默认只有“示例”两字胶囊，展开后是方格图卡片 ---------- */
   .ex-fold { margin: 10px 0 6px; }
   .ex-btn { font-weight: 700; letter-spacing: 2px; padding: 5px 16px; border-radius: 999px; }
-  .ex-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-  .ex-item { text-align: left; background: #f6f8fb; border: 1px solid var(--line); color: #26303d; border-radius: 8px; padding: 6px 12px; font-size: 13.5px; font-family: Consolas, "Microsoft YaHei", monospace; white-space: normal; word-break: break-all; line-height: 1.5; }
-  .ex-item:hover { background: #e8eef8; border-color: #2b5fd9; }
+  .ex-list { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  .ex-card { cursor: pointer; border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 6px; background: #fcfdfe; transition: border-color .12s, box-shadow .12s; }
+  .ex-card:hover { border-color: #2b5fd9; box-shadow: 0 4px 14px rgba(43, 95, 217, .16); }
+  .ex-card table.ms { margin: 0; }
+  .ex-cap { text-align: center; font-size: 12.5px; color: var(--dim); margin-top: 5px; }
 
   /* ---------- “?”帮助按钮与帮助弹窗 ---------- */
   .btn-help { width: 34px; padding: 6px 0; font-weight: 700; border-radius: 50%; }
@@ -158,8 +160,9 @@
     table.ms, table.data { page-break-inside: avoid; }
     details.proof-details > summary { display: none; }
     details.proof-details { border: none; padding: 0; }
-    .ex-list { display: block !important; }   /* 打印时示例完整展开 */
-    .ex-item { border: none; background: none; padding: 2px 0; }
+    .ex-list { display: flex !important; }   /* 打印时示例完整展开 */
+    .ex-btn { display: none; }               /* 打印时隐藏“示例/收起”胶囊按钮 */
+    .ex-card { border: none; box-shadow: none; background: none; }
   }
 </style>
 </head>
@@ -288,6 +291,9 @@
       if (typeof n === 'bigint') n = Number(n);
       if (typeof d === 'bigint') d = Number(d);
       if (typeof n !== 'number' || typeof d !== 'number') throw new Error('Frac: 非法参数');
+      // NaN/Infinity/非整数提前拒绝：否则 gcd 会死循环或结果失真
+      if (!Number.isFinite(n) || !Number.isFinite(d) || !Number.isInteger(n) || !Number.isInteger(d))
+        throw new Error('Frac: 非法参数（需有限整数）');
       if (d === 0) throw new Error('分母不能为 0');
       if (d < 0) { n = -n; d = -d; }
       const g = gcd(n, d);
@@ -338,7 +344,9 @@
     return a.div(b);
   }
 
-  /** 若能写成有限小数则返回其字符串，否则 null */
+  /** 若能写成有限小数则返回其字符串，否则 null。
+   *  全程整数运算：10^k/f.d = 2^(k-c2)·5^(k-c5) 是整数（< 2^53），
+   *  避免 f.n * 10^k 的浮点乘法在长小数下失真/变科学计数法（曾产出 '0.01.4…e+21' 坏串）。 */
   function exactDecimal(f) {
     let d = f.d, c2 = 0, c5 = 0;
     while (d % 2 === 0) { d /= 2; c2++; }
@@ -346,7 +354,10 @@
     if (d !== 1) return null;
     let k = c2;
     if (c5 > k) k = c5;
-    let s = String(f.n * Math.pow(10, k) / f.d);
+    const mult = Math.pow(2, k - c2) * Math.pow(5, k - c5);   // = 10^k / f.d，整数
+    const num = f.n * mult;
+    if (!isFinite(num) || Math.abs(num) > 4503599627370496) return null;   // 超精确范围：退回分数显示
+    let s = String(num);
     const neg = s[0] === '-';
     if (neg) s = s.slice(1);
     while (s.length <= k) s = '0' + s;
@@ -1180,6 +1191,7 @@
     }
 
     let found = null;
+    let exact = true;   // 是否精确穷尽（false = 只做了随机尝试，结论只能“未找到”，不能“无解”）
     if (m === 0) {
       if (part.every(isInt)) found = part.slice(0, N + 1);
     } else if (Math.pow(L, m) <= 300000) {
@@ -1198,7 +1210,8 @@
         if (j === m) done = true;
       }
     } else {
-      // 规模过大：随机取样（结论标为“未找到”而非“无解”）
+      // 规模过大：随机取样（只允许得出“未找到”，不得声称无解）
+      exact = false;
       let seed = 7717;
       const rnd = function () { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
       for (let q = 0; q < 5000 && !found; q++) {
@@ -1212,6 +1225,14 @@
       }
     }
     if (!found) {
+      if (!exact) {
+        return {
+          feasible: null,
+          reason: '在“只允许整数”的限定下**未能找到**整数填法：规模过大（L = ' + L + '，自由参数 ' + m +
+            ' 个），只做了有限次随机尝试——这不构成“无解”的证明，仅供参考。',
+          witness: null
+        };
+      }
       return {
         feasible: false,
         reason: '在“只允许整数”的限定下无解：已经按周期性穷尽检查（L = ' + L + '，自由参数 ' + m + ' 个），' +
@@ -1360,11 +1381,23 @@
     const undeterminedCells = [];
     for (let c = 0; c < N; c++) if (!known.has(c)) undeterminedCells.push(c);
 
-    // 多组填法与随机试解：整数限定下必须全部是整数（用整数见证 + 整数方向平移）
-    const isIntegerMode = !!(domainInfo && domainInfo.kind === 'integer');
+    // 多组填法与随机试解——必须与值域一致：
+    //  - classic/set（每个数恰好用一次）：示例只能来自穷举得到的合法填法；
+    //    n≥5 不穷举时宁可不给示例，也不能用有理方向构造（那会违反值域、出现分数）；
+    //  - integer：整数见证 + 整数方向平移（全整数）；
+    //  - none：有理特解 + 零空间方向（任意有理数都合法）。
+    const domKind = domainInfo ? domainInfo.kind : 'none';
+    const isDistinct = !!(domainInfo && domainInfo.distinct);
+    const isIntegerMode = domKind === 'integer';
     let sampling = null;
     let examples = null;
-    if (isIntegerMode && integerInfo && integerInfo.feasible === true) {
+    if (isDistinct) {
+      if (csp && csp.ok && csp.samples && csp.samples.length > 1 && !complete) {
+        examples = csp.samples.slice(0, 2).map(function (cells) {
+          return { cells: cells.slice(), S: domainInfo.S ? fmtNumber(domainInfo.S) : null };
+        });
+      }
+    } else if (isIntegerMode && integerInfo && integerInfo.feasible === true) {
       const w = integerInfo.witnessCells;
       const dirs = integerInfo.intDirs || [];
       const pickDir = dirs.find(function (dv) {
@@ -1387,12 +1420,17 @@
           agreeWithLinear: null, unique: false, illustrative: true, integer: true
         };
         if (!complete && givenMap.size > 0) {
-          examples = [sampleObjs[1], sampleObjs[2]].map(function (cells) { return { cells: cells.slice(), S: fmtNumber(w[N]) }; });
+          // 每组示例标注**它自己**的幻和（沿整数方向平移时 S 会变，不能统一写 w 的 S）
+          const sOf = function (k) { return fmtNumber(w[N].add(pickDir[N].mul(new Frac(k)))); };
+          examples = [
+            { cells: sampleObjs[1].slice(), S: sOf(-1) },   // k = -1
+            { cells: sampleObjs[2].slice(), S: sOf(0) }     // k = 0
+          ];
         }
       }
     }
-    if (!sampling) sampling = sampleCompletions(model, part, D, determined, givenMap);
-    if (!examples && !complete && D.length > 0 && givenMap.size > 0) {
+    if (!sampling && !isDistinct && domKind !== 'integer') sampling = sampleCompletions(model, part, D, determined, givenMap);
+    if (!examples && !isDistinct && domKind !== 'integer' && !complete && D.length > 0 && givenMap.size > 0) {
       let dir = D.find(function (d) { return undeterminedCells.some(function (c) { return !d[c].isZero(); }); });
       if (!dir) dir = D.reduce(function (a, b) { return a.map(function (x, i) { return x.add(b[i]); }); });
       examples = [part, part.map(function (x, i) { return x.add(dir[i]); })].map(function (p) {
@@ -1754,7 +1792,9 @@
     const cells = [];
     for (let i = 0; i < N; i++) cells.push({ text: model.letters[i], kind: 'red' });
     proofBlocks.push(GRID(n, cells, [S('红色：' + n + ' 条行线覆盖全部 ' + N + ' 格（每格恰好一次）', { cls: 'err', b: 1 })]));
-    proofBlocks.push(P(S('左边 = 全部数字之和 = 1 + 2 + … + ' + N + ' = '), B(step.totalStr),
+    // 限定来源不同的写法：classic 是 1+2+…+n²；set 是“全部限定数字相加”（不能写 1+2+…+n² 的假等式）
+    const sumExpr = step.domainKind === 'set' ? '全部限定数字相加（' + step.domainNote + '）' : '1 + 2 + … + ' + N;
+    proofBlocks.push(P(S('左边 = 全部数字之和 = ' + sumExpr + ' = '), B(step.totalStr),
       S('（' + step.domainNote + '）；右边 = ' + n + ' 条线各等于 S，共 ' + n + '·S。所以 ' + n + '·S = ' + step.totalStr + '，两边除以 ' + n + ' 得 '), B('S = ' + step.valueStr), S('。∎')));
     bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: proofBlocks });
 
@@ -1970,43 +2010,65 @@
         grid: GRID(n, cs, [S(capText)])
       });
     };
+    // 限定值域（classic/set）：示例只来自穷举得到的合法填法——
+    // 每个数恰好用一次、天然符合值域；绝不用有理方向构造（那会出现分数、违反“各用一次”）
+    if (result.domain && (result.domain.kind === 'classic' || result.domain.kind === 'set')) {
+      const c = result.csp;
+      if (c && c.ok && c.samples && c.samples.length > 1) {
+        const stableSet = new Set(c.stableCells || []);
+        for (let q = 0; q < Math.min(3, c.samples.length); q++) {
+          push(c.samples[q], '限定范围内的合法填法（穷举所得，每个数恰好用一次）',
+            function (idx) { return givSet.has(idx) ? 'given' : (stableSet.has(idx) ? 'derived' : 'diff'); },
+            '示例 ' + (items.length + 1) + '：限定范围内的合法填法 ' + (q + 1) + ' / ' + c.count +
+            (c.exhaustive ? '' : '（已找到的部分填法，未穷尽）') +
+            '。红色 = 各填法间取值不同的格子，绿色 = 每种填法里都相同（即穷举证明的确定解）');
+        }
+      }
+      return items.length ? { t: 'examples', n: n, items: items } : null;
+    }
+    // 成对比较：这些示例之间真实取值不同的格子（标红才名符其实；恰好相同的未定格标灰）
+    const varyingAmong = function (samples) {
+      const set = new Set();
+      for (let q = 1; q < samples.length; q++)
+        for (let i = 0; i < samples[q].length; i++)
+          if (samples[q][i] !== samples[0][i]) set.add(i);
+      return set;
+    };
     // ① 反例双填法（已知数定不住全部格子时，证明“这些格子确实还能变”）
     if (result.examples && result.examples.length) {
       const isInt = result.domain && result.domain.kind === 'integer';
+      const vary = varyingAmong(result.examples.map(function (e) { return e.cells; }));
       for (let i = 0; i < result.examples.length; i++) {
         const ex = result.examples[i];
         push(ex.cells,
-          '满足全部已知条件' + (isInt ? '且全为整数' : '') + '，未确定的格子取值不同',
-          function (idx) { return givSet.has(idx) ? 'given' : (result.undeterminedCells.indexOf(idx) >= 0 ? 'diff' : 'derived'); },
-          '示例 ' + (items.length + 1) + '：与已知相容的填法（幻和 S = ' + ex.S + '）' + (isInt ? '，全为整数' : '') + '。未确定的格子取值不同，说明它们无法由已知数推出');
+          '满足全部已知条件' + (isInt ? '且全为整数' : '') + '，红色格子在各示例间取值不同',
+          function (idx) { return givSet.has(idx) ? 'given' : (vary.has(idx) ? 'diff' : 'unknown'); },
+          '示例 ' + (items.length + 1) + '：与已知相容的填法（幻和 S = ' + ex.S + '）' + (isInt ? '，全为整数' : '') +
+          '。红色 = 各示例间取值不同的格子（无法由已知数唯一确定）；灰色 = 在这几组示例里恰好相同、但未被证明确定的格子');
       }
     }
     // ② 随机试解 / 整数填法示例
     const sp = result.sampling;
     if (sp && sp.samples && sp.samples.length) {
       if (sp.illustrative) {
-        const varying = new Set(sp.varyingCells || []);
+        const vary = varyingAmong(sp.samples);
         for (let q = 0; q < sp.samples.length; q++) {
           push(sp.samples[q], '全部为整数且满足已知条件的填法',
-            function (idx) { return givSet.has(idx) ? 'given' : (varying.has(idx) ? 'diff' : 'derived'); },
-            '示例 ' + (items.length + 1) + '：整数填法（“只允许整数”下的合法填法 ' + (q + 1) + ' / ' + sp.count + '）。只作存在性示意，不作为“确定”的证明');
+            function (idx) { return givSet.has(idx) ? 'given' : (vary.has(idx) ? 'diff' : 'unknown'); },
+            '示例 ' + (items.length + 1) + '：整数填法（“只允许整数”下的合法填法 ' + (q + 1) + ' / ' + sp.count + '）。红色 = 各示例间取值不同的格子；只作存在性示意，不作为“确定”的证明');
         }
       } else if (!sp.unique) {
-        const stable = new Set(sp.stableCells);
+        const stable = new Set(sp.stableCells);          // 全部 count 组里每次都相同
+        const vary = varyingAmong(sp.samples);           // 展示的这几组之间就不同
         for (let q = 0; q < sp.samples.length; q++) {
           push(sp.samples[q], '随机试解得到的一组解（满足全部已知条件）',
-            function (idx) { return givSet.has(idx) ? 'given' : (stable.has(idx) ? 'derived' : 'diff'); },
-            '示例 ' + (items.length + 1) + '：随机试解（' + (q + 1) + ' / ' + sp.count + '）。红色 = 各次取值不同的格子，绿色 = 每次都相同');
+            function (idx) {
+              if (givSet.has(idx)) return 'given';
+              if (vary.has(idx)) return 'diff';
+              return stable.has(idx) ? 'derived' : 'unknown';
+            },
+            '示例 ' + (items.length + 1) + '：随机试解（' + (q + 1) + ' / ' + sp.count + '）。绿色 = ' + sp.count + ' 组里每次都相同（可确定）；红色 = 展示组间已不同；灰色 = 展示组里恰好相同');
         }
-      }
-    }
-    // ③ 有限值域穷举所得的合法填法
-    if (result.csp && result.csp.ok && result.csp.exhaustive && result.csp.count > 1 && result.csp.samples && result.csp.samples.length) {
-      const stableSet = new Set(result.csp.stableCells || []);
-      for (let q = 0; q < Math.min(2, result.csp.samples.length); q++) {
-        push(result.csp.samples[q], '限定范围内的合法填法（穷举所得）',
-          function (idx) { return givSet.has(idx) ? 'given' : (stableSet.has(idx) ? 'derived' : 'diff'); },
-          '示例 ' + (items.length + 1) + '：限定范围内的合法填法 ' + (q + 1) + ' / ' + result.csp.count + '。取值相同的格子（绿色）即穷举证明的确定解');
       }
     }
     if (!items.length) return null;
@@ -2034,6 +2096,9 @@
       bl.push(H3('值域限定：「' + result.domain.note + '」'));
       if (result.domain.S) {
         bl.push(P(S('由限定「' + result.domain.note + '」，全部数字之和 = ' + result.domain.total + '，' + n + ' 条行线恰好覆盖全部格子一次，所以 ' + n + '·S = ' + result.domain.total + '，即 '), B('S = ' + result.domain.S), S('（第 1 步已证）。')));
+        if (n >= 5 && !result.complete) {
+          bl.push(P(S('说明：' + n + ' 阶及以上不做限定范围内的穷举（规模过大），下面标为“无法唯一确定”的格子仅指**线性推导**无法确定；在限定值域下其中个别格子仍可能被确定。', { cls: 'dim' })));
+        }
       } else if (result.domain.kind === 'integer') {
         bl.push(P(S('限定“只允许整数”：解出的每个数都必须是整数。')));
       }
@@ -2042,7 +2107,8 @@
       if (result.integer.feasible === true) {
         bl.push(P(S('整数解存在性：已找到一组全部为整数的填法 ✓（例如 S = ' + result.integer.S + '）。')));
       } else if (result.integer.reason) {
-        bl.push(P(S(result.integer.reason, { cls: 'err' })));
+        // feasible === false：已证明无解（红）；feasible === null：只是没找到（灰，不构成无解证明）
+        bl.push(P(S(result.integer.reason, { cls: result.integer.feasible === false ? 'err' : 'dim' })));
       }
     }
 
@@ -2087,13 +2153,22 @@
     const rows = [];
     for (const g of result.givens) rows.push([S('题设'), S(g.label), S(g.valueStr), S('题目给定'), S('—')]);
     for (const st of result.steps) {
-      rows.push([
-        S('第' + st.i + '步'),
-        S(st.isS ? 'S' : st.label),
-        S(st.valueStr),
-        S(st.theorem ? st.theorem.name : '线性恒等式'),
-        S(st.premises.map(function (p) { return p.label + '(' + p.source.replace('第', '第').replace('步', '步') + ')'; }).join('、'))
-      ]);
+      if (st.special === 'domain-S') {
+        rows.push([S('第' + st.i + '步'), S('S'), S(st.valueStr), S('值域限定（题设）'), S('—')]);
+      } else if (st.special === 'csp') {
+        rows.push([S('第' + st.i + '步'),
+          S(st.cspInfo.extras.map(function (e) { return e.label; }).join('、')),
+          S(st.cspInfo.extras.map(function (e) { return e.label + '=' + e.valueStr; }).join('、')),
+          S('穷举验证（所有合法填法中都相同）'), S('—')]);
+      } else {
+        rows.push([
+          S('第' + st.i + '步'),
+          S(st.isS ? 'S' : st.label),
+          S(st.valueStr),
+          S(st.theorem ? st.theorem.name : '线性恒等式'),
+          S(st.premises.map(function (p) { return p.label + '(' + p.source.replace('第', '第').replace('步', '步') + ')'; }).join('、'))
+        ]);
+      }
     }
     bl.push(TBL([S('顺序'), S('目标'), S('数值'), S('依据'), S('用到的已知数')], rows));
 
@@ -2678,6 +2753,7 @@
 
   $('selN').addEventListener('change', function () {
     buildInputs(Number(this.value));
+    syncDomainUI();   // 切阶数后刷新限定集合提示/预填（n² 随阶数变化）
     setQuickBar(null);
     scheduleAuto(0);
   });
@@ -2826,7 +2902,6 @@
     const toolbar = $('toolbar');
     if (!result) {
       bar.style.display = 'none';
-      if (state.view === 'full') return;
       toolbar.style.display = 'none';
       $('pages').style.display = 'none';
       state.view = 'none';
@@ -2840,8 +2915,10 @@
     if (result.complete) {
       html += '<b>已全部解出！</b>' + result.model.N + ' 个格子都已确定并自动填入（蓝色=你输入的，绿色=自动推出）。';
     } else {
+      const hiNoCsp = result.domain && result.domain.kind !== 'none' && result.domain.S && result.n >= 5;
       html += '当前能确定 <b>' + det + ' / ' + result.model.N + '</b> 个格子，已自动填入填写框；其余 ' +
-        result.undeterminedCells.length + ' 格在现有已知下无法唯一确定（剩 ' + result.dimFree + ' 个自由参数）。';
+        result.undeterminedCells.length + ' 格' + (hiNoCsp ? '未被线性推导确定（高阶不做限定范围内的穷举）' : '在现有已知下无法唯一确定') +
+        '（剩 ' + result.dimFree + ' 个自由参数）。';
     }
     html += result.S ? '　幻和 S = <b>' + result.S.valueStr + '</b>。' : '　幻和 S 尚未确定。';
     if (result.domain && result.domain.kind !== 'none') {
@@ -2934,35 +3011,47 @@
       return;
     }
     if (b.t === 'examples') {
-      // 示例填法：默认只有“示例”两字胶囊；点击展开列表；点击条目把该组数值写入填写区。
-      // 只 toggle 列表显隐，不改分页状态、不重渲染（打印 CSS 强制展开）。
+      // 示例填法：默认只有“示例”两字胶囊；展开后每组是一张方格图；点击方格把该组数值写入填写区。
+      // 只 toggle 显隐，不改分页状态、不重渲染（打印 CSS 强制展开）。
       const wrap = el('div', 'ex-fold');
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ghost ex-btn';
       btn.textContent = '示例';
-      btn.title = '点击展开 / 收起示例填法；点击某组示例可把该组数字写入填写区（可 Ctrl+Z 撤回）';
+      btn.title = '点击展开 / 收起示例填法（方格图）；点击某张方格可把该组数字写入填写区（可 Ctrl+Z 撤回）';
       const list = el('div', 'ex-list');
       list.style.display = 'none';
       b.items.forEach(function (it, q) {
-        const rows = [];
-        for (let r = 0; r < b.n; r++) rows.push(it.values.slice(r * b.n, (r + 1) * b.n).join(' '));
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.className = 'ex-item';
-        row.textContent = '示例 ' + (q + 1) + '：' + rows.join(' / ');
-        row.title = '点击把这组数字写入填写区（作为已知数，黑色；可 Ctrl+Z 撤回）';
-        row.addEventListener('click', function () {
+        const card = el('div', 'ex-card');
+        card.title = (it.note || '') + '。点击把这组数字写入填写区（作为已知数，黑色；可 Ctrl+Z 撤回）';
+        const tb = document.createElement('table');
+        tb.className = 'ms';
+        applySquareSize(tb, it.grid.cells);
+        for (let r = 0; r < b.n; r++) {
+          const tr = document.createElement('tr');
+          for (let c = 0; c < b.n; c++) {
+            const cell = it.grid.cells[r * b.n + c] || { text: '', kind: 'dot' };
+            const td = document.createElement('td');
+            td.className = 'k-' + (cell.kind || 'dot');
+            const fh = (cell.kind === 'given' || cell.kind === 'derived' || cell.kind === 'new') ? fracHtml(cell.text) : null;
+            if (fh) td.innerHTML = fh; else td.textContent = cell.text;
+            tr.appendChild(td);
+          }
+          tb.appendChild(tr);
+        }
+        card.appendChild(tb);
+        card.appendChild(el('div', 'ex-cap', '示例 ' + (q + 1)));
+        card.addEventListener('click', function () {
           if (it.values.length !== state.grid.values.length) return;   // 阶数已变时不写入
           pushHistory();
           setGrid(it.values.slice());
           $('inputErr').textContent = '';
         });
-        list.appendChild(row);
+        list.appendChild(card);
       });
       btn.addEventListener('click', function () {
         const collapsed = list.style.display === 'none';
-        list.style.display = collapsed ? 'block' : 'none';
+        list.style.display = collapsed ? 'flex' : 'none';
         btn.textContent = collapsed ? '收起' : '示例';
       });
       wrap.appendChild(btn);
@@ -3076,21 +3165,33 @@
     mask.addEventListener('click', function (e) { if (e.target === mask) mask.remove(); });
     box.appendChild(close);
 
+    // 特殊步（domain-S / csp）没有格子坐标与前提，需单独命名，避免 st.cell.r 崩溃
+    const whatName = st.special === 'csp'
+      ? '穷举确定的格子（' + (st.cspInfo && st.cspInfo.extras ? st.cspInfo.extras.map(function (e) { return e.label; }).join('、') : '') + '）'
+      : (st.isS ? '幻和 S' : '格子 ' + st.label + (st.cell ? '（第' + st.cell.r + '行第' + st.cell.c + '列）' : ''));
     const title = document.createElement('div');
     title.className = 'modal-title';
-    title.textContent = '这个数是根据哪几个数推出的？——' + (st.isS ? '幻和 S' : '格子 ' + st.label + '（第' + st.cell.r + '行第' + st.cell.c + '列）') + ' = ' + st.valueStr + '（第 ' + st.i + ' 步）';
+    title.textContent = '这个数是根据哪几个数推出的？——' + whatName + (st.valueStr ? ' = ' + st.valueStr : '') + '（第 ' + st.i + ' 步）';
     box.appendChild(title);
 
     const p = el('p', 'blk-p');
-    renderSegs(p, [
-      { text: '根据 ' },
-      ...st.premises.map(function (q, i) {
-        return { text: (i ? '、' : '') + q.label + ' = ' + q.valueStr + '（' + q.source + '）', cls: q.sourceIdx == null ? 'given' : 'derived', b: 1 };
-      }),
-      { text: '  ⇒  ' },
-      { text: (st.isS ? 'S' : st.label) + ' = ' + st.valueStr, cls: 'new', b: 1 },
-      { text: st.theorem ? '　依据：' + st.theorem.name : '　依据：线性恒等式（证明见下）', cls: 'dim' }
-    ]);
+    if (st.premises && st.premises.length) {
+      renderSegs(p, [
+        { text: '根据 ' },
+        ...st.premises.map(function (q, i) {
+          return { text: (i ? '、' : '') + q.label + ' = ' + q.valueStr + '（' + q.source + '）', cls: q.sourceIdx == null ? 'given' : 'derived', b: 1 };
+        }),
+        { text: '  ⇒  ' },
+        { text: (st.isS ? 'S' : st.label) + ' = ' + st.valueStr, cls: 'new', b: 1 },
+        { text: st.theorem ? '　依据：' + st.theorem.name : '　依据：线性恒等式（证明见下）', cls: 'dim' }
+      ]);
+    } else if (st.special === 'csp') {
+      renderSegs(p, [
+        { text: '依据：穷举验证 —— 在「限定数字各用一次」的全部 ' + ((st.cspInfo && st.cspInfo.count) || '?') + ' 种合法填法里，这些格子每次都取同一个值，因此是确定的。', cls: 'dim' }
+      ]);
+    } else {
+      renderSegs(p, [{ text: '依据：' + (st.domainNote || '值域限定') + '（题设）。', cls: 'dim' }]);
+    }
     box.appendChild(p);
 
     const blocks = MagicRender.stepBlocks(state.result, st);
