@@ -39,6 +39,16 @@
     });
     return out === '' ? '0' : out;
   }
+
+  function regionCellStr(model, e) {
+    if (e.count > 1) return e.count + '·' + model.letters[e.cell];
+    return model.letters[e.cell];
+  }
+  function eqEqSafe(t) { return t; }
+  function regionStr(model, arr) {
+    if (!arr || arr.length === 0) return '0';
+    return arr.map(function (e) { return regionCellStr(model, e); }).join(' + ');
+  }
   function coeffListStr(lambda) { // "(+1 − 1 …)"
     const parts = lambda.map(function (L) {
       if (L.coeff < 0) { return String(L.coeff); }
@@ -64,6 +74,7 @@
     'S-line': '幻和定理：S 就等于任何一条完整线上 n 个数之和。',
     'line-complete': '补线法：一条线上只缺一格时，缺格 = S − 其余格之和。',
     'opposite': '对顶定理：三阶幻方中，过中心的同一条线上，与中心对称的两格之和恰为中心的 2 倍。',
+    'knight3': '马步定理（三阶）：角上那个数的 2 倍 = 与它成马步的两格之和。证明思路：过该角的三条线之和 = 3S，全部数之和 = 3S，重叠部分成对抵消即得——这正是“多线去交叉”技巧。',
     'center-S': '中心定理：奇数阶幻方的中心 = S/n（即 n×中心 = S）。',
     'corner4': '四角和定理：四阶幻方四个角上的数之和恰为幻和 S。'
   };
@@ -71,6 +82,7 @@
     'S-line': '幻和等于任何一条完整线的和，这已在第{j}步证明；对本题的这条线即得',
     'line-complete': '补线法已在第{j}步证明；对本题的这条线即得',
     'opposite': '对顶定理已在第{j}步证明；把其中关于中心对称的两格换成本题的相应格子，即得',
+    'knight3': '马步定理已在第{j}步证明；把其中的角格与两个马步格换成本题的相应格子，即得',
     'center-S': '中心定理已在第{j}步证明；这里直接得到',
     'corner4': '四角和定理已在第{j}步证明；这里直接得到'
   };
@@ -114,18 +126,20 @@
     bl.push(P(B('结论：'), S('只用 ' + step.d + ' 个已知的数 —— ' + premDesc + ' —— 就能唯一确定 ' + (step.isS ? '幻和 S' : '格子 ' + step.label) + ' 的值：'), B(step.label + ' = ' + step.valueStr + '。')));
     if (step.theorem) bl.push(P(S('（' + step.theorem.name + '：' + THEOREM_NOTE[step.theorem.key] + '）', { cls: 'dim' })));
 
-    // 证明
-    bl.push(H3('证明（对任意 ' + n + ' 阶幻方成立）'));
-    bl.push(P(S('先证一条与具体数字无关的结论。下图给出证明中要用到的格子字母（“·”表示本步用不到）：')));
-    bl.push(letterGrid(model, step.involvedCells));
+    // 证明（默认折叠，可展开；打印/导出时自动展开）
+    const pb = [];
+    pb.push(P(S('先证一条与具体数字无关的结论。下图给出证明中要用到的格子字母（“·”表示本步用不到，只标注涉及到的格子）：')));
+    pb.push(letterGrid(model, step.involvedCells));
     if (step.refStep) {
       const ref = result.steps[step.refStep - 1];
       const sent = (REF_SENTENCE[step.theorem ? step.theorem.key : 'sig'] || '第{j}步已证同样的关系；这里对应地得到').replace('{j}', String(step.refStep));
-      bl.push(P(S('本步用到的结论已经在' + (ref.theorem ? '第 ' + step.refStep + ' 步（' + ref.theorem.name + '）' : '第 ' + step.refStep + ' 步') + '证明过：那里证明了 '), B(ref ? identityStr(ref) : ''), S('。' + sent + '：'), B(identityStr(step) + '。')));
+      pb.push(P(S('本步用到的结论已经在' + (ref.theorem ? '第 ' + step.refStep + ' 步（' + ref.theorem.name + '）' : '第 ' + step.refStep + ' 步') + '证明过：那里证明了 '), B(ref ? identityStr(ref) : ''), S('。' + sent + '：'), B(identityStr(step) + '。')));
     } else {
       const lam = step.identity.lambda;
-      bl.push(P(S(n + ' 阶幻方中，每条行、列及两条对角线的和都等于同一个幻和 S。本步用到下列线（系数用于加权求和）：')));
-      bl.push(TBL(
+      const T = step.identity.T;
+      const tech = step.identity.tech || 4;
+      pb.push(P(S(n + ' 阶幻方中，每条行、列及两条对角线的和都等于同一个幻和 S。本步用到下列线（系数用于加权求和）：')));
+      pb.push(TBL(
         [S('系数'), S('这条线的和'), S('是哪条线')],
         lam.map(function (L) {
           let coeffStr;
@@ -133,21 +147,54 @@
           return [S(coeffStr), S('(' + L.cells.map(function (c) { return model.letters[c]; }).join(' + ') + ')'), S(L.name)];
         })
       ));
-      const T = step.identity.T;
-      bl.push(P(S('把它们按系数加权相加：左边 = '), B(expansionStr(step)), S('；右边 = ' + coeffListStr(lam) + '×S = ' + T + '×S。')));
-      bl.push(P(S('于是 '), B(expansionStr(step) + ' = ' + T + '×S'), S('，移项整理得'), B('　' + identityStr(step) + '　'), S('。证毕。∎')));
-      // 通俗解释
+
+      // 技巧一（幻和直用）/ 技巧二（两线去交叉）/ 技巧三（多线容斥）：画块示意
+      const reg = step.identity.regions;
+      if (reg && (reg.red.length || reg.blue.length)) {
+        const redSet = new Map(reg.red.map(function (e) { return [e.cell, e.count]; }));
+        const blueSet = new Map(reg.blue.map(function (e) { return [e.cell, e.count]; }));
+        const cells = [];
+        for (let i = 0; i < model.N; i++) {
+          if (redSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: redSet.get(i) }), kind: 'red' });
+          else if (blueSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: blueSet.get(i) }), kind: 'blue' });
+          else cells.push({ text: '·', kind: 'dot' });
+        }
+        pb.push(P(S(tech === 2
+          ? '画块示意（两线去交叉）：两条线的和相等，先去掉它们的交叉格（两边各一个，正好抵消），剩下的红、蓝两部分的和也相等：'
+          : '画块示意（多线去交叉）：把系数为正的线相加、系数为负的线相减，重叠的格子成对抵消，只剩下红色的格子与蓝色的格子（×n 表示出现 n 次）：')));
+        pb.push(GRID(model.n, cells, [
+          S('红色部分的和', { cls: 'err', b: 1 }), S(' = ', { b: 1 }),
+          S('蓝色部分的和' + (T === 0 ? '' : ' + ' + T + '×S'), { cls: 'given', b: 1 }),
+          S('　（灰点 = 已抵消/未涉及的格子）')
+        ]));
+        const redEq = regionStr(model, reg.red);
+        const blueEq = regionStr(model, reg.blue);
+        let eqText = redEq + ' = ';
+        if (T === 0) eqText += blueEq;
+        else eqText += (reg.blue.length ? blueEq + ' + ' : '') + T + '×S';
+        pb.push(P(S('用字母写就是：'), B(eqEqSafe(eqText)), S('，整理即得'), B('　' + identityStr(step) + '　'), S('。')));
+      }
+
+      pb.push(P(S('把它们按系数加权相加：左边 = '), B(expansionStr(step)), S('；右边 = ' + coeffListStr(lam) + '×S = ' + T + '×S。')));
+      pb.push(P(S('于是 '), B(expansionStr(step) + ' = ' + T + '×S'), S('，移项整理得'), B('　' + identityStr(step) + '　'), S('。证毕。∎')));
+      // 通俗解释（按技巧分级给说法）
       const posL = lam.filter(function (L) { return L.coeff > 0; }).map(function (L) { return L.name; });
       const negL = lam.filter(function (L) { return L.coeff < 0; }).map(function (L) { return L.name; });
       let col;
-      if (T === 0) {
-        col = '通俗地说：这些线的和全是同一个数 S。把带正号的线（' + posL.join('、') + '）的“和”全部加起来，再减去带负号的线（' + (negL.join('、') || '无') + '）的“和”，因为正、负系数的总数相同，右边的 S 恰好全部抵消；左边逐个字母清点，出现次数相同的字母相互抵消，只剩下 ' + expansionStr(step) + ' = 0，即 ' + identityStr(step) + '。';
+      if (tech === 1) {
+        col = '通俗地说：这条线上 ' + n + ' 个数的和就是幻和 S，所以线上缺哪个数，用 S 减去其余的数就得到了。';
+      } else if (reg && (reg.red.length || reg.blue.length)) {
+        const rs = regionStr(model, reg.red), bs = regionStr(model, reg.blue);
+        col = '通俗地说：每条线的和都等于 S，所以“红线组加起来”与“蓝线组加起来”里的重叠格子两边各出现同样多次，互相抵消（容斥），剩下：' + rs + ' = ' + (T === 0 ? bs : bs + ' + ' + T + '×S') + '。这就是“去掉交叉部分，剩余部分之和相等”的技巧。';
+      } else if (T === 0) {
+        col = '通俗地说：这些线的和全是同一个数 S。把带正号的线（' + posL.join('、') + '）的“和”全部加起来，再减去带负号的线（' + (negL.join('、') || '无') + '）的“和”，右边的 S 恰好全部抵消；左边逐个字母清点，出现次数相同的字母相互抵消，只剩下 ' + expansionStr(step) + ' = 0，即 ' + identityStr(step) + '。';
       } else {
-        col = '通俗地说：这些线的和全是同一个数 S。把它们按系数加权相加，右边就是 ' + T + '×S；左边逐个字母清点、合并同类项，得到 ' + expansionStr(step) + '。两边相等并移项，就得到 ' + identityStr(step) + '。式中的 S 是幻和——它要么已在前面求出，要么可由本式与其它已知联立求出。';
+        col = '通俗地说：这些线的和全是同一个数 S。把它们按系数加权相加，右边就是 ' + T + '×S；左边逐个字母清点、合并同类项，得到 ' + expansionStr(step) + '。两边相等并移项，就得到 ' + identityStr(step) + '。';
       }
       col += '这个关系对任何 ' + n + ' 阶幻方都成立。';
-      bl.push(P(S(col, { cls: 'dim' })));
+      pb.push(P(S(col, { cls: 'dim' })));
     }
+    bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: pb });
 
     // 运用
     bl.push(H3('运用（代入本题数字）'));
@@ -205,7 +252,9 @@
     bl.push(P(S('按行的顺序给每个格子一个字母（下图），后文用字母指代格子；S 表示幻和。')));
     bl.push(letterGrid(model, Array.from({ length: model.N }, function (_, i) { return i; })));
     bl.push(H3('思路'));
-    bl.push(P(S('任何 ' + n + ' 阶幻方的全部填法共有 '), B(model.m + ' 个自由参数'), S('。若某格在“满足全部已知条件的所有填法”中取值都相同，它就是可确定的。下面从'), B('需要已知数最少'), S('的结论开始：每一步先证明一条对任意幻方都成立的恒等式（用字母，与具体数字无关），再代入本题数字，从而“出数”一个格子；如此逐步推出所有能确定的格子。即使已知数不足以解出整个幻方，凡能确定的格子都会被推出。')));
+    bl.push(P(S('任何 ' + n + ' 阶幻方的全部填法共有 '), B(model.m + ' 个自由参数'), S('。若某格在“满足全部已知条件的所有填法”中取值都相同，它就是可确定的。下面从'), B('需要已知数最少'), S('的结论开始：每一步先证明一条对任意幻方都成立的恒等式（用字母，与具体数字无关），再代入本题数字，从而“出数”一个格子；如此逐步推出所有能确定的格子。即使已知数不足以解出整个幻方，凡能确定的格子都会被推出。'),
+      S('输入时程序处于快速模式：只把能确定的数自动回填到填写框（不展示证明）；点'), B('“求 解”'), S('后才给出完整的逐步证明（证明默认折叠，点击可展开；每步只标注该步涉及的格子字母）。'),
+      S('证明按技巧从简到难选择：能用幻和直出的优先，其次是“两线去交叉”“多线去交叉（容斥）”等组合技巧，并尽量配画块示意（红色部分 = 蓝色部分）。')));
     return bl;
   }
 
@@ -233,6 +282,26 @@
             return { text: t, kind: isUnd ? 'diff' : (isGiv ? 'given' : 'derived') };
           });
           bl.push(GRID(n, cells, [S('填法' + '一二'.charAt(i) + '（幻和 S = ' + ex.S + '）')]));
+        }
+      }
+    }
+
+    // 随机试解验证
+    const sp = result.sampling;
+    if (sp) {
+      bl.push(H3('随机试解验证（换个角度看“能否确定”）'));
+      if (sp.unique) {
+        bl.push(P(S('在全部已知条件下随机试解：无论怎么取，只能得到同一组数——说明每个格子都被唯一确定（这也与上面逐格推出的结果一致）。')));
+      } else {
+        const stable = new Set(sp.stableCells);
+        bl.push(P(S('在满足全部已知条件的解空间里随机取了 '), B(sp.count + ' 组'), S(' 解（下面展示其中 3 组；红色 = 各次取值不同的格子，绿色 = 每次都相同的格子）：')));
+        bl.push(P(S('每次都取相同值的格子，恰好就是上面推出的那些格子（与线性判定' + (sp.agreeWithLinear ? '完全一致 ✓' : '不一致 ✗（不应发生）') + '）。这正说明：往这些格子里填别的数字就无解——它们是确定解，所以程序自动填上了；红色格子还能变，说明现有已知数定不住它们。')));
+        for (let q = 0; q < sp.samples.length; q++) {
+          const cells = sp.samples[q].map(function (t, idx) {
+            const isGiv = result.givens.some(function (g) { return g.coord === idx; });
+            return { text: t, kind: isGiv ? 'given' : (stable.has(idx) ? 'derived' : 'diff') };
+          });
+          bl.push(GRID(n, cells, [S('随机解 ' + (q + 1) + ' / ' + sp.count)]));
         }
       }
     }
