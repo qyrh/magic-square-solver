@@ -130,6 +130,21 @@
   #quickBar { background: #fff; border: 1px solid #bfe3c8; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14.5px; }
   #quickBar .dim { color: var(--dim); font-size: 13px; }
 
+  /* ---------- 示例折叠（总结页）：默认只有“示例”两字胶囊 ---------- */
+  .ex-fold { margin: 10px 0 6px; }
+  .ex-btn { font-weight: 700; letter-spacing: 2px; padding: 5px 16px; border-radius: 999px; }
+  .ex-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .ex-item { text-align: left; background: #f6f8fb; border: 1px solid var(--line); color: #26303d; border-radius: 8px; padding: 6px 12px; font-size: 13.5px; font-family: Consolas, "Microsoft YaHei", monospace; white-space: normal; word-break: break-all; line-height: 1.5; }
+  .ex-item:hover { background: #e8eef8; border-color: #2b5fd9; }
+
+  /* ---------- “?”帮助按钮与帮助弹窗 ---------- */
+  .btn-help { width: 34px; padding: 6px 0; font-weight: 700; border-radius: 50%; }
+  .help-modal h4 { margin: 14px 0 4px; font-size: 15px; color: #1d2f52; }
+  .help-modal ul { margin: 4px 0; padding-left: 20px; font-size: 13.5px; }
+  .help-modal li { margin: 2px 0; }
+  table.help-letters { border-collapse: collapse; margin: 6px auto; }
+  table.help-letters td { border: 1px solid #b9c2cc; min-width: 36px; height: 36px; text-align: center; font-size: 13px; color: #55606d; font-style: italic; padding: 2px 6px; }
+
   /* ---------- 打印 ---------- */
   @media print {
     body { background: #fff; }
@@ -142,6 +157,8 @@
     table.ms, table.data { page-break-inside: avoid; }
     details.proof-details > summary { display: none; }
     details.proof-details { border: none; padding: 0; }
+    .ex-list { display: block !important; }   /* 打印时示例完整展开 */
+    .ex-item { border: none; background: none; padding: 2px 0; }
   }
 </style>
 </head>
@@ -176,6 +193,7 @@
       <button class="ghost" id="btnClear">清空</button>
       <span style="flex:1"></span>
       <button class="big" id="btnSolve">求 解</button>
+      <button class="ghost btn-help" title="使用说明与字母记号">?</button>
     </div>
     <div id="gridBox"></div>
     <div id="setBox" style="display:none; margin-top:8px;">
@@ -217,15 +235,16 @@
       <button class="ghost" id="btnProofs">📖 展开全部证明</button>
       <button class="ghost" id="btnPrint">🖨 打印 / 导出 PDF</button>
       <button class="ghost" id="btnDocx">📄 导出 DOCX</button>
+      <button class="ghost btn-help" title="使用说明与字母记号">?</button>
     </div>
     <div id="pages"></div>
     <p class="hint no-print" style="text-align:center;">提示：绿色（已推出）/ 黄色（本步新推出）的格子可点击，查看该数是根据哪几个数、依据什么结论推出的。打印时选择“另存为 PDF”即可导出 PDF。</p>
   </section>
 </div>
 
-<script src="magic-core.js?v=22"></script>
-<script src="render.js?v=22"></script>
-<script src="docx.js?v=22"></script>
-<script src="app.js?v=22"></script>
+<script src="magic-core.js?v=23"></script>
+<script src="render.js?v=23"></script>
+<script src="docx.js?v=23"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>
