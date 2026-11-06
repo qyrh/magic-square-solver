@@ -899,7 +899,11 @@
     };
   }
 
-  /* ---------------- 仅整数：整数性检查与整数解见证 ---------------- */
+  /* ---------------- 仅整数：整数性检查与整数解见证 ----------------
+   * 精确判定思路：解 x = part + D·t。整数的成立只取决于 t 模 L（L = part 与 D 所有分母的最小公倍数），
+   * 因此枚举 t ∈ [0,L)^m 即可判定是否存在整数解；找到的解同时作为“整数填法见证”，
+   * 由整数方向 L·D[j] 平移得到的仍然是整数解（用于多解示例）。
+   */
   function checkIntegerSolutions(prep) {
     const model = prep.model, part = prep.part, D = prep.D, determined = prep.determined;
     const N = model.N;
@@ -915,43 +919,67 @@
       };
     }
     const m = D.length;
+    // 公共分母 L
+    let L = 1;
+    const lcm = function (a, b) { return a / gcd(a, b) * b; };
+    for (let i = 0; i <= N; i++) L = lcm(L, part[i].d);
+    for (let j = 0; j < m; j++) for (let i = 0; i <= N; i++) L = lcm(L, D[j][i].d);
+
+    // 整数方向（乘 L 后各分量都是整数）
+    const intDirs = [];
+    for (let j = 0; j < m; j++) {
+      const v = new Array(N + 1);
+      for (let i = 0; i <= N; i++) v[i] = D[j][i].mul(new Frac(L));
+      intDirs.push(v);
+    }
+
     let found = null;
     if (m === 0) {
       if (part.every(isInt)) found = part.slice(0, N + 1);
+    } else if (Math.pow(L, m) <= 300000) {
+      // 精确：枚举 t ∈ [0,L)^m
+      const t = new Array(m).fill(0);
+      let done = false;
+      while (!done) {
+        const x = part.slice(0, N + 1);
+        for (let j = 0; j < m; j++) {
+          if (!t[j]) continue;
+          for (let i = 0; i <= N; i++) x[i] = x[i].add(D[j][i].mul(new Frac(t[j])));
+        }
+        if (x.every(isInt)) { found = x; break; }
+        let j = 0;
+        while (j < m) { t[j]++; if (t[j] < L) break; t[j] = 0; j++; }
+        if (j === m) done = true;
+      }
     } else {
-      const test = function (params) {
-        const pt = part.slice(0, N + 1);
-        for (let j = 0; j < params.length; j++) {
-          if (!params[j]) continue;
-          for (let i = 0; i <= N; i++) pt[i] = pt[i].add(D[j][i].mul(new Frac(params[j])));
+      // 规模过大：随机取样（结论标为“未找到”而非“无解”）
+      let seed = 7717;
+      const rnd = function () { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+      for (let q = 0; q < 5000 && !found; q++) {
+        const x = part.slice(0, N + 1);
+        for (let j = 0; j < m; j++) {
+          const k = (rnd() % (2 * L + 1)) - L;
+          if (!k) continue;
+          for (let i = 0; i <= N; i++) x[i] = x[i].add(D[j][i].mul(new Frac(k)));
         }
-        for (let i = 0; i <= N; i++) if (!isInt(pt[i])) return null;
-        return pt;
-      };
-      if (m <= 4) {
-        const R = 4;
-        const cur = new Array(m).fill(0);
-        const rec = function (depth) {
-          if (found) return;
-          if (depth === m) { const w = test(cur); if (w) found = w; return; }
-          for (let v = -R; v <= R; v++) { cur[depth] = v; rec(depth + 1); if (found) return; }
-        };
-        rec(0);
-      } else {
-        let seed = 7717;
-        const rnd = function () { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
-        for (let t = 0; t < 4000 && !found; t++) {
-          const cur = new Array(m);
-          for (let j = 0; j < m; j++) cur[j] = (rnd() % 9) - 4;
-          const w = test(cur);
-          if (w) found = w;
-        }
+        if (x.every(isInt)) found = x;
       }
     }
     if (!found) {
-      return { feasible: null, reason: '未能在“只允许整数”的限定下找到整数填法（可尝试放宽限定或检查已知数）。' };
+      return {
+        feasible: false,
+        reason: '在“只允许整数”的限定下无解：已经按周期性穷尽检查（L = ' + L + '，自由参数 ' + m + ' 个），' +
+          '不存在每个格子都是整数的填法。'
+      };
     }
-    return { feasible: true, witness: found.slice(0, N).map(fmtNumber), S: fmtNumber(found[N]), reason: null };
+    return {
+      feasible: true,
+      witness: found.slice(0, N).map(fmtNumber),
+      witnessCells: found.slice(0, N + 1),
+      intDirs: intDirs,
+      S: fmtNumber(found[N]),
+      reason: null
+    };
   }
 
   /* ---------------- 值域限定 ----------------
@@ -1023,7 +1051,6 @@
     const integerInfo = (opts && opts.integerInfo) || null;
 
     const known = ded.known;
-    const sampling = sampleCompletions(model, part, D, determined, givenMap);
 
     // 由值域限定直接得到的幻和（第 1 步，无前提）
     const steps = [];
@@ -1074,8 +1101,39 @@
     const undeterminedCells = [];
     for (let c = 0; c < N; c++) if (!known.has(c)) undeterminedCells.push(c);
 
+    // 多组填法与随机试解：整数限定下必须全部是整数（用整数见证 + 整数方向平移）
+    const isIntegerMode = !!(domainInfo && domainInfo.kind === 'integer');
+    let sampling = null;
     let examples = null;
-    if (!complete && D.length > 0 && givenMap.size > 0) {
+    if (isIntegerMode && integerInfo && integerInfo.feasible === true) {
+      const w = integerInfo.witnessCells;
+      const dirs = integerInfo.intDirs || [];
+      const pickDir = dirs.find(function (dv) {
+        return undeterminedCells.some(function (c) { return !dv[c].isZero(); });
+      });
+      if (pickDir) {
+        const sampleObjs = [-2, -1, 0, 1, 2].map(function (k) {
+          const cells = w.slice(0, N).map(function (f, i) { return fmtNumber(f.add(pickDir[i].mul(new Frac(k)))); });
+          return cells;
+        });
+        const varying = new Set();
+        for (let i = 0; i < N; i++) {
+          for (let q = 1; q < sampleObjs.length; q++) {
+            if (sampleObjs[q][i] !== sampleObjs[0][i]) { varying.add(i); break; }
+          }
+        }
+        sampling = {
+          count: sampleObjs.length, samples: sampleObjs.slice(0, 3),
+          stableCells: [], varyingCells: Array.from(varying),
+          agreeWithLinear: null, unique: false, illustrative: true, integer: true
+        };
+        if (!complete && givenMap.size > 0) {
+          examples = [sampleObjs[1], sampleObjs[2]].map(function (cells) { return { cells: cells.slice(), S: fmtNumber(w[N]) }; });
+        }
+      }
+    }
+    if (!sampling) sampling = sampleCompletions(model, part, D, determined, givenMap);
+    if (!examples && !complete && D.length > 0 && givenMap.size > 0) {
       let dir = D.find(function (d) { return undeterminedCells.some(function (c) { return !d[c].isZero(); }); });
       if (!dir) dir = D.reduce(function (a, b) { return a.map(function (x, i) { return x.add(b[i]); }); });
       examples = [part, part.map(function (x, i) { return x.add(dir[i]); })].map(function (p) {
