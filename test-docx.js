@@ -15,26 +15,37 @@ function buildCase(n, giv) {
   return Core.solveMagic(n, m);
 }
 
-// 1) 洛书：检查 render 文档块结构
+// 1) 洛书：检查 render 文档块结构（第一页即第 1 步，无前置说明页）
 {
   const r = buildCase(3, { 0: '2', 1: '7', 4: '5' });
   const doc = Render.buildDocument(r);
   const pages = doc.pages;
-  ok(pages.length === r.steps.length + 2, '页数 = 步数+2 (得到 ' + pages.length + ')');
-  const step1 = pages[1];
+  ok(pages.length === r.steps.length + 1, '页数 = 步数+1 (得到 ' + pages.length + ')');
+  const step1 = pages[0];
   const txt = JSON.stringify(step1);
+  ok(/第 1 步/.test(txt), '第一页即“第 1 步”（无前置说明页）');
   ok(/证明/.test(txt) && /运用/.test(txt) && /示意图/.test(txt), '每步含 证明/运用/示意图');
   // 第一步是 S：证明里应出现幻和定义（单线求和）
   ok(/幻和/.test(txt) && /S/.test(txt), 'S 的推导证明含幻和定义');
+  const h3s = [];
+  pages.forEach(p => p.forEach(b => { if (b.t === 'h3') h3s.push(b.text); }));
+  ok(!h3s.includes('记号') && !h3s.includes('思路'), '无前置说明页的“记号/思路”标题');
 }
 
-// 2) 两数定一格：证明里应出现对顶定理与字母
+// 2) 两数定一格：证明里应出现对顶定理与字母；总结页有“示例”折叠块
 {
   const r = buildCase(3, { 0: '1', 8: '9' });
   const doc = Render.buildDocument(r);
-  const t = JSON.stringify(doc.pages[1]);
+  const t = JSON.stringify(doc.pages[0]);
   ok(/对顶定理/.test(t), '识别对顶定理');
   ok(/2·e = a \+ i|2·e/.test(t), '含恒等式 2e = a + i 形式');
+  const last = doc.pages[doc.pages.length - 1];
+  const exB = last.filter(b => b.t === 'examples');
+  ok(exB.length === 1 && exB[0].items.length >= 2, '总结页含“示例”折叠块（≥2 组，得到 ' + (exB.length ? exB[0].items.length : 0) + '）');
+  ok(exB.length === 1 && exB[0].items.every(it => it.values.length === 9 && it.grid.n === 3), '示例条目带 9 个数值与网格');
+  ok(exB.length === 1 && exB[0].items.every(it => /^示例 \d+$/.test(it.label)), '示例条目 label = 示例 k');
+  const bytes = Docx.buildDocx(doc.pages, doc.title);
+  ok(bytes.length > 3000, '含示例块的 DOCX 可生成 (' + bytes.length + ')');
 }
 
 // 3) DOCX 生成 + zip 结构校验（含分数题：立体分数与正方形行高）
@@ -57,9 +68,6 @@ function buildCase(n, giv) {
   const rf = buildCase(3, { 0: '1/2', 1: '1/3', 4: '2.75' });
   const docF = Render.buildDocument(rf);
   const bytes = Docx.buildDocx(docF.pages, docF.title);
-  const zlib = require('zlib');
-  // 直接从 docx.js 拿 XML 太绕：重新用页面文本判断——改为检查 zip 内容
-  const AdmLike = null; // 占位，下面用文件
   fs.writeFileSync(path.join(__dirname, 'sample-frac.docx'), bytes);
   console.log('  已生成分数样例 sample-frac.docx');
 }
