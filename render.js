@@ -115,8 +115,66 @@
 
   function sSrc(sourceIdx) { return sourceIdx == null ? '题设' : '第' + sourceIdx + '步'; }
 
+  /* ---- 值域限定：直接得到幻和（第 1 步） ---- */
+  function domainSBlocks(result, step) {
+    const model = result.model, n = result.n, N = result.N;
+    const bl = [];
+    bl.push(H2('第 1 步　直接得到 幻和 S = ' + step.valueStr + '（由「' + step.domainNote + '」）'));
+    bl.push(P(B('结论：'), S('由题设「' + step.domainNote + '」可知全部 ' + N + ' 个数之和为 '), B(step.totalStr),
+      S('；而 ' + n + ' 条行线恰好把所有格子各算一次，它们的和是 ' + n + '·S。于是 ' + n + '·S = ' + step.totalStr + '，即 '), B('S = ' + step.valueStr), S(' —— 不需要任何已知格子。')));
+    bl.push(P(S('（这就是为什么限定「1…n²」时证明会短很多：幻和一开始就知道，后面每一步都能直接用幻和。）', { cls: 'dim' })));
+
+    // 证明：画块（整格红 = 行线覆盖范围）
+    const proofBlocks = [];
+    proofBlocks.push(P(S('把 ' + n + ' 条行线全部加起来（下图红色就是它们的覆盖范围，正好是整个方阵）：')));
+    const cells = [];
+    for (let i = 0; i < N; i++) cells.push({ text: model.letters[i], kind: 'red' });
+    proofBlocks.push(GRID(n, cells, [S('红色：' + n + ' 条行线覆盖全部 ' + N + ' 格（每格恰好一次）', { cls: 'err', b: 1 })]));
+    proofBlocks.push(P(S('左边 = 全部数字之和 = 1 + 2 + … + ' + N + ' = '), B(step.totalStr),
+      S('（' + step.domainNote + '）；右边 = ' + n + ' 条线各等于 S，共 ' + n + '·S。所以 ' + n + '·S = ' + step.totalStr + '，两边除以 ' + n + ' 得 '), B('S = ' + step.valueStr), S('。∎')));
+    bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: proofBlocks });
+
+    bl.push(H3('运用（后续步骤可直接使用）'));
+    bl.push(P(B('运用：'), S('S = ' + step.valueStr + ' 已知。后面凡是一条线上已知 ' + (n - 1) + ' 个数，就能用「S − 其余数」直接出数；证明中也会优先使用幻和。')));
+    bl.push(H3('填入后的示意图'));
+    bl.push(stateGrid(model, step.snapshot, -1, [S('幻和 S = ' + step.valueStr + '（已知），灰色字母 = 尚未确定的格子。')]));
+    return bl;
+  }
+
+  /* ---- 值域限定：穷举验证（末步） ---- */
+  function cspBlocks(result, step) {
+    const model = result.model, n = result.n;
+    const info = step.cspInfo;
+    const bl = [];
+    bl.push(H2('第 ' + step.i + ' 步　穷举验证：在限定数字范围内所有合法填法都相同'));
+    const names = info.extras.map(function (e) { return e.label + ' = ' + e.valueStr; }).join('，');
+    bl.push(P(B('结论：'), S('在「' + (result.domain ? result.domain.note : '限定数字') + '」的全部合法填法中，'), B(names),
+      S(' —— 这几个格子在**所有**填法里都取同一个值，所以它们也是确定的（自动填入）。')));
+    const proofBlocks = [];
+    proofBlocks.push(P(S('做法：把限定范围内的数字各用一次，逐个格子试填，并始终要求每条行、列、对角线的和都等于 S = ' +
+      (result.domain && result.domain.S ? result.domain.S : '?') + '。对所有分支穷尽搜索后，共得到 '), B(info.count + ' 种'), S('合法填法（没有遗漏）。')));
+    proofBlocks.push(P(S('既然每种合法填法里这些格子都等于同一个数，那么把它们填成别的数就**无解**——它们就是确定解。这就是“为什么某个格子能确定”的完整证明。')));
+    if (info.samples && info.samples.length > 0) {
+      proofBlocks.push(P(S('下面是穷举得到的若干种填法（可以看到这些格子在各填法中都相同）：')));
+      for (let q = 0; q < info.samples.length; q++) {
+        const cells = info.samples[q].map(function (t, idx) {
+          const isGiv = result.givens.some(function (g) { return g.coord === idx; });
+          const isExtra = info.extras.some(function (e) { return e.coord === idx; });
+          return { text: t, kind: isGiv ? 'given' : (isExtra ? 'new' : 'derived') };
+        });
+        proofBlocks.push(GRID(n, cells, [S('合法填法 ' + (q + 1) + ' / ' + info.count)]));
+      }
+    }
+    bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: proofBlocks });
+    bl.push(H3('填入后的示意图'));
+    bl.push(stateGrid(model, step.snapshot, -1, [S('绿色/黄色 = 已确定（含穷举确定），灰色字母 = 在限定下仍可变化。')]));
+    return bl;
+  }
+
   /* ---- 单步页面 ---- */
   function stepBlocks(result, step) {
+    if (step.special === 'domain-S') return domainSBlocks(result, step);
+    if (step.special === 'csp') return cspBlocks(result, step);
     const model = result.model, n = result.n;
     const bl = [];
     bl.push(H2('第 ' + step.i + ' 步　确定 ' + (step.isS ? '幻和 S' : '格子 ' + step.label + '（第' + step.cell.r + '行第' + step.cell.c + '列）') + ' = ' + step.valueStr));
@@ -283,6 +341,58 @@
           });
           bl.push(GRID(n, cells, [S('填法' + '一二'.charAt(i) + '（幻和 S = ' + ex.S + '）')]));
         }
+      }
+    }
+
+    // 值域限定说明
+    if (result.domain && result.domain.kind !== 'none') {
+      bl.push(H3('值域限定：「' + result.domain.note + '」'));
+      if (result.domain.S) {
+        bl.push(P(S('由限定「' + result.domain.note + '」，全部数字之和 = ' + result.domain.total + '，' + n + ' 条行线恰好覆盖全部格子一次，所以 ' + n + '·S = ' + result.domain.total + '，即 '), B('S = ' + result.domain.S), S('（第 1 步已证）。此后每一步都能直接使用幻和。')));
+      } else if (result.domain.kind === 'integer') {
+        bl.push(P(S('限定“只允许整数”：解出的每个数都必须是整数。程序会检查所有可确定的数是否都是整数，并尝试构造一组整数填法作为存在性见证。')));
+      }
+    }
+    if (result.integer) {
+      if (result.integer.feasible === true) {
+        bl.push(P(S('整数解存在性：已找到一组全部为整数的填法 ✓（例如 S = ' + result.integer.S + '）。')));
+      } else if (result.integer.reason) {
+        bl.push(P(S(result.integer.reason, { cls: 'err' })));
+      }
+    }
+
+    // 穷举验证（有限值域）
+    if (result.csp && result.csp.ok) {
+      bl.push(H3('穷举验证（在限定数字范围内枚举所有合法填法）'));
+      if (result.csp.exhaustive) {
+        bl.push(P(S('共穷尽得到 '), B(result.csp.count + ' 种'), S('合法填法（无遗漏）。')));
+        if (result.csp.count === 1) {
+          bl.push(P(S('只有一种填法 ⇒ 所有格子都被唯一确定，这就是唯一的解。')));
+        } else {
+          const extra = result.csp.extras || [];
+          const stableSet = new Set(result.csp.stableCells || []);
+          const stableNames = [];
+          for (const c of stableSet) {
+            const e = result.knownEntries.find(function (x) { return x.coord === c; });
+            if (e && c !== result.model.SC) stableNames.push(result.model.letters[c]);
+          }
+          bl.push(P(S('在这 ' + result.csp.count + ' 种填法里，'), B(stableNames.length ? stableNames.join('、') : '（没有）'),
+            S(' 每次都取相同的值——所以它们是确定解（填别的数就无解）；其余格子在不同填法里会变，说明现有已知数定不住它们。')));
+          if (extra.length > 0) {
+            bl.push(P(S('其中 ' + extra.map(function (c) { return result.model.letters[c]; }).join('、') + ' 是线性推导推不出、但穷举能确定的（已作为最后一步自动填入）。')));
+          }
+          if (result.csp.samples && result.csp.samples.length > 1) {
+            for (let q = 0; q < Math.min(2, result.csp.samples.length); q++) {
+              const cells = result.csp.samples[q].map(function (t, idx) {
+                const isGiv = result.givens.some(function (g) { return g.coord === idx; });
+                return { text: t, kind: isGiv ? 'given' : (stableSet.has(idx) ? 'derived' : 'diff') };
+              });
+              bl.push(GRID(n, cells, [S('合法填法示例 ' + (q + 1) + ' / ' + result.csp.count)]));
+            }
+          }
+        }
+      } else {
+        bl.push(P(S('搜索达到计算上限（已找到 ' + result.csp.count + ' 种合法填法，但未穷尽），因此只采用线性可严格证明的结论；未穷尽的搜索不能作为“确定”的依据。', { cls: 'dim' })));
       }
     }
 
