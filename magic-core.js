@@ -290,7 +290,7 @@
   }
 
   /* ---------------- 常用定理识别（仅用于命名/讲解） ---------------- */
-  const THEOREM_RANK = { 'S-line': 0, 'center-S': 1, 'opposite': 2, 'corner4': 3, 'line-complete': 4 };
+  const THEOREM_RANK = { 'S-line': 0, 'center-S': 1, 'opposite': 2, 'corner4': 3, 'knight3': 4, 'line-complete': 5 };
   function isCorner(model, c) {
     const n = model.n, r = Math.floor(c / n), col = c % n;
     return (r === 0 || r === n - 1) && (col === 0 || col === n - 1);
@@ -330,8 +330,61 @@
         if (rest.length === 2 && model.rot180(rest[0]) === rest[1])
           return { key: 'opposite', name: '对顶定理（三阶）' };
       }
+      // 马步定理：角上的数×2 = 与它成马步的两数之和（2a = f + h 型）
+      if (cells.length === 2) {
+        const trio = [k, cells[0], cells[1]];
+        const corner = trio.find(function (c) { return isCorner(model, c); });
+        if (corner !== undefined) {
+          const r0 = Math.floor(corner / 3), c0 = corner % 3;
+          const k1 = 1 * 3 + (2 - c0);   // (中行, 角列的对列)
+          const k2 = (2 - r0) * 3 + 1;   // (角行的对行, 中列)
+          const s = new Set(trio);
+          if (s.size === 3 && s.has(k1) && s.has(k2))
+            return { key: 'knight3', name: '马步定理（三阶）' };
+        }
+      }
     }
     return null;
+  }
+
+  /* ---------------- 技巧分级与“去交叉”区域 ---------------- */
+  /**
+   * 技巧优先级（证明策略排序用）：
+   *  1 = 幻和直用（单条线的和 = S，即可出数/出 S）
+   *  2 = 两线去交叉：两条线的和相等，去掉交叉格后剩余部分之和相等
+   *  3 = 多线容斥：若干条线的和（各计一次）与另若干条线/总和相等，重叠部分成对抵消
+   *  4 = 一般加权组合
+   */
+  function techniqueClass(lambdaMap) {
+    if (lambdaMap.size === 1) return 1;
+    let allUnit = true;
+    for (const v of lambdaMap.values()) {
+      if (v !== 1 && v !== -1) { allUnit = false; break; }
+    }
+    if (!allUnit) return 4;
+    if (lambdaMap.size === 2) return 2;
+    return 3;
+  }
+  /**
+   * “去交叉”区域：把 λ 为正的线记为红组、负的线记为蓝组（各按次数计入），
+   * 两组公共的格子成对抵消，剩下的即红色部分与蓝色部分。
+   * 恒等式可读成：红色部分（按次数）= 蓝色部分（按次数）+ T×S。
+   */
+  function buildRegions(model, lambdaMap) {
+    const plus = new Map(), minus = new Map(); // cell -> 次数
+    for (const e of lambdaMap) {
+      const mult = e[1] > 0 ? e[1] : -e[1];
+      const tgt = e[1] > 0 ? plus : minus;
+      for (const cell of model.lines[e[0]].cells) tgt.set(cell, (tgt.get(cell) || 0) + mult);
+    }
+    for (const cell of Array.from(plus.keys())) {
+      if (!minus.has(cell)) continue;
+      const m = Math.min(plus.get(cell), minus.get(cell));
+      const a = plus.get(cell) - m, b = minus.get(cell) - m;
+      if (a > 0) plus.set(cell, a); else plus.delete(cell);
+      if (b > 0) minus.set(cell, b); else minus.delete(cell);
+    }
+    return { red: plus, blue: minus };
   }
 
   /* ---------------- 最少已知数（极小前提）搜索 ---------------- */
@@ -443,13 +496,16 @@
             const v = lamVals[q];
             if (v < 0) { lamSum = lamSum - v; } else { lamSum = lamSum + v; }
           }
+          const tech = techniqueClass(id.lambdaMap);   // 技巧分级：1幻和直用 2两线去交叉 3多线容斥 4一般
           const score = [
+            tech,
             thm ? (THEOREM_RANK[thm.key] !== undefined ? THEOREM_RANK[thm.key] : 9) : 9,
             id.lambdaMap.size, lamSum,
             tie.target === SC ? 1 : 0, tie.target
           ];
           if (chosen === null || scoreLess(score, chosen.score)) {
             chosen = { C: C, id: id, thm: thm, score: score };
+            chosen.id.tech = tech;
             chosenTarget = tie.target;
           }
         }
@@ -524,7 +580,11 @@
         value: value, valueStr: fmtNumber(value),
         d: Ceff.length,
         premises: premises,
-        identity: { gamma: id.gamma, T: id.T, terms: termsOrdered, expansion: expansion, lambda: lambdaList },
+        identity: {
+            gamma: id.gamma, T: id.T, terms: termsOrdered, expansion: expansion, lambda: lambdaList,
+            tech: id.tech,
+            regions: id.tech === 2 || id.tech === 3 ? regionsToArrays(buildRegions(model, id.lambdaMap)) : null
+          },
         theorem: thm, refStep: refStep,
         involvedCells: Array.from(involved),
         snapshot: knownEntries.map(function (e) { return { coord: e.coord, valueStr: fmtNumber(known.get(e.coord)), source: e.source }; })
@@ -539,6 +599,53 @@
     let last;
     while (true) { const r = g.next(); if (r.done) { last = r.value; break; } }
     return last;
+  }
+
+
+  function regionsToArrays(reg) {
+    const red = [], blue = [];
+    for (const e of reg.red) red.push({ cell: e[0], count: e[1] });
+    for (const e of reg.blue) blue.push({ cell: e[0], count: e[1] });
+    red.sort(function (a, b) { return a.cell - b.cell; });
+    blue.sort(function (a, b) { return a.cell - b.cell; });
+    return { red: red, blue: blue };
+  }
+
+  /* ---------------- 随机试解验证 ----------------
+   * 从解空间随机取 12 个满足全部已知条件的填法，看哪些格子每次都相等；
+   * 与线性判定交叉校验（两者必须一致）。确定性 LCG，保证可复现。 */
+  function sampleCompletions(model, part, D, determined, givenMap) {
+    if (givenMap.size === 0) return null;
+    const N = model.N;
+    if (D.length === 0) {
+      const stable = [];
+      for (let i = 0; i < N; i++) stable.push(i);
+      return { count: 1, samples: [], stableCells: stable, agreeWithLinear: true, unique: true };
+    }
+    let seed = 20260611;
+    const rnd = function () { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+    const K = 12;
+    const grids = [];
+    const stableFlags = new Array(N).fill(true);
+    for (let t = 0; t < K; t++) {
+      const cells = part.slice(0, N);
+      for (let j = 0; j < D.length; j++) {
+        let c = (rnd() % 7) - 3;
+        if (c === 0 && rnd() % 2 === 0) c = 1;
+        if (c === 0) continue;
+        for (let i = 0; i < N; i++) cells[i] = cells[i].add(D[j][i].mul(new Frac(c)));
+      }
+      grids.push(cells.map(fmtNumber));
+      for (let i = 0; i < N; i++) if (grids[t][i] !== grids[0][i]) stableFlags[i] = false;
+    }
+    let agree = true;
+    const detSet = new Set(determined);
+    for (let i = 0; i < N; i++) {
+      if (detSet.has(i) !== stableFlags[i]) { agree = false; }
+    }
+    const stableCells = [];
+    for (let i = 0; i < N; i++) if (stableFlags[i]) stableCells.push(i);
+    return { count: K, samples: [grids[0], grids[1], grids[2]], stableCells: stableCells, agreeWithLinear: agree, unique: false };
   }
 
   /* ---------------- 对外主接口 ---------------- */
@@ -569,6 +676,7 @@
     const known = ded.known;
 
     const complete = determined.filter(function (c) { return c !== SC; }).length === N;
+    const sampling = sampleCompletions(model, part, D, determined, givenMap);
     const undeterminedCells = [];
     for (let c = 0; c < N; c++) if (!known.has(c)) undeterminedCells.push(c);
 
@@ -618,6 +726,7 @@
       undeterminedCells: undeterminedCells,
       determinedCount: determined.length,
       examples: examples,
+      sampling: sampling,
       verification: verification,
       error: null
     };
