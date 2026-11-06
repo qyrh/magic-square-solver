@@ -42,6 +42,9 @@
       if (typeof n === 'bigint') n = Number(n);
       if (typeof d === 'bigint') d = Number(d);
       if (typeof n !== 'number' || typeof d !== 'number') throw new Error('Frac: 非法参数');
+      // NaN/Infinity/非整数提前拒绝：否则 gcd 会死循环或结果失真
+      if (!Number.isFinite(n) || !Number.isFinite(d) || !Number.isInteger(n) || !Number.isInteger(d))
+        throw new Error('Frac: 非法参数（需有限整数）');
       if (d === 0) throw new Error('分母不能为 0');
       if (d < 0) { n = -n; d = -d; }
       const g = gcd(n, d);
@@ -92,7 +95,9 @@
     return a.div(b);
   }
 
-  /** 若能写成有限小数则返回其字符串，否则 null */
+  /** 若能写成有限小数则返回其字符串，否则 null。
+   *  全程整数运算：10^k/f.d = 2^(k-c2)·5^(k-c5) 是整数（< 2^53），
+   *  避免 f.n * 10^k 的浮点乘法在长小数下失真/变科学计数法（曾产出 '0.01.4…e+21' 坏串）。 */
   function exactDecimal(f) {
     let d = f.d, c2 = 0, c5 = 0;
     while (d % 2 === 0) { d /= 2; c2++; }
@@ -100,7 +105,10 @@
     if (d !== 1) return null;
     let k = c2;
     if (c5 > k) k = c5;
-    let s = String(f.n * Math.pow(10, k) / f.d);
+    const mult = Math.pow(2, k - c2) * Math.pow(5, k - c5);   // = 10^k / f.d，整数
+    const num = f.n * mult;
+    if (!isFinite(num) || Math.abs(num) > 4503599627370496) return null;   // 超精确范围：退回分数显示
+    let s = String(num);
     const neg = s[0] === '-';
     if (neg) s = s.slice(1);
     while (s.length <= k) s = '0' + s;
@@ -934,6 +942,7 @@
     }
 
     let found = null;
+    let exact = true;   // 是否精确穷尽（false = 只做了随机尝试，结论只能“未找到”，不能“无解”）
     if (m === 0) {
       if (part.every(isInt)) found = part.slice(0, N + 1);
     } else if (Math.pow(L, m) <= 300000) {
@@ -952,7 +961,8 @@
         if (j === m) done = true;
       }
     } else {
-      // 规模过大：随机取样（结论标为“未找到”而非“无解”）
+      // 规模过大：随机取样（只允许得出“未找到”，不得声称无解）
+      exact = false;
       let seed = 7717;
       const rnd = function () { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
       for (let q = 0; q < 5000 && !found; q++) {
@@ -966,6 +976,14 @@
       }
     }
     if (!found) {
+      if (!exact) {
+        return {
+          feasible: null,
+          reason: '在“只允许整数”的限定下**未能找到**整数填法：规模过大（L = ' + L + '，自由参数 ' + m +
+            ' 个），只做了有限次随机尝试——这不构成“无解”的证明，仅供参考。',
+          witness: null
+        };
+      }
       return {
         feasible: false,
         reason: '在“只允许整数”的限定下无解：已经按周期性穷尽检查（L = ' + L + '，自由参数 ' + m + ' 个），' +
@@ -1114,11 +1132,23 @@
     const undeterminedCells = [];
     for (let c = 0; c < N; c++) if (!known.has(c)) undeterminedCells.push(c);
 
-    // 多组填法与随机试解：整数限定下必须全部是整数（用整数见证 + 整数方向平移）
-    const isIntegerMode = !!(domainInfo && domainInfo.kind === 'integer');
+    // 多组填法与随机试解——必须与值域一致：
+    //  - classic/set（每个数恰好用一次）：示例只能来自穷举得到的合法填法；
+    //    n≥5 不穷举时宁可不给示例，也不能用有理方向构造（那会违反值域、出现分数）；
+    //  - integer：整数见证 + 整数方向平移（全整数）；
+    //  - none：有理特解 + 零空间方向（任意有理数都合法）。
+    const domKind = domainInfo ? domainInfo.kind : 'none';
+    const isDistinct = !!(domainInfo && domainInfo.distinct);
+    const isIntegerMode = domKind === 'integer';
     let sampling = null;
     let examples = null;
-    if (isIntegerMode && integerInfo && integerInfo.feasible === true) {
+    if (isDistinct) {
+      if (csp && csp.ok && csp.samples && csp.samples.length > 1 && !complete) {
+        examples = csp.samples.slice(0, 2).map(function (cells) {
+          return { cells: cells.slice(), S: domainInfo.S ? fmtNumber(domainInfo.S) : null };
+        });
+      }
+    } else if (isIntegerMode && integerInfo && integerInfo.feasible === true) {
       const w = integerInfo.witnessCells;
       const dirs = integerInfo.intDirs || [];
       const pickDir = dirs.find(function (dv) {
@@ -1141,12 +1171,17 @@
           agreeWithLinear: null, unique: false, illustrative: true, integer: true
         };
         if (!complete && givenMap.size > 0) {
-          examples = [sampleObjs[1], sampleObjs[2]].map(function (cells) { return { cells: cells.slice(), S: fmtNumber(w[N]) }; });
+          // 每组示例标注**它自己**的幻和（沿整数方向平移时 S 会变，不能统一写 w 的 S）
+          const sOf = function (k) { return fmtNumber(w[N].add(pickDir[N].mul(new Frac(k)))); };
+          examples = [
+            { cells: sampleObjs[1].slice(), S: sOf(-1) },   // k = -1
+            { cells: sampleObjs[2].slice(), S: sOf(0) }     // k = 0
+          ];
         }
       }
     }
-    if (!sampling) sampling = sampleCompletions(model, part, D, determined, givenMap);
-    if (!examples && !complete && D.length > 0 && givenMap.size > 0) {
+    if (!sampling && !isDistinct && domKind !== 'integer') sampling = sampleCompletions(model, part, D, determined, givenMap);
+    if (!examples && !isDistinct && domKind !== 'integer' && !complete && D.length > 0 && givenMap.size > 0) {
       let dir = D.find(function (d) { return undeterminedCells.some(function (c) { return !d[c].isZero(); }); });
       if (!dir) dir = D.reduce(function (a, b) { return a.map(function (x, i) { return x.add(b[i]); }); });
       examples = [part, part.map(function (x, i) { return x.add(dir[i]); })].map(function (p) {
