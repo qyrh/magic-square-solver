@@ -41,6 +41,10 @@
   table.inp td i { position: absolute; left: 4px; top: 1px; font-size: 10px; color: #9aa3af; font-style: normal; pointer-events: none; }
   table.inp.small { --inp-cell: 2.5em; }
   table.inp.small input { font-size: 13px; }
+  /* 自动推出的数（回填到填写框）：绿色斜体 + 填充闪光 */
+  table.inp input.derived-val { color: var(--derived); background: #ecf6ef; font-style: italic; font-weight: 600; }
+  table.inp input.just-filled { box-shadow: 0 0 0 3px #a8dab6; }
+  table.inp input.derived-val::placeholder { color: #b7c9bd; }
 
   .hint { font-size: 12.5px; color: var(--dim); }
   .errbox { color: var(--err); font-size: 13.5px; white-space: pre-line; margin-top: 6px; }
@@ -106,6 +110,21 @@
   .modal .modal-close { position: absolute; right: 10px; top: 8px; width: 32px; height: 32px; padding: 0; font-size: 17px; line-height: 1; border-radius: 50%; }
   .modal .blk-h2 { display: none; }   /* 步骤标题已在弹窗标题中呈现 */
 
+
+  /* ---------- 证明折叠 ---------- */
+  details.proof-details { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; padding: 0 12px; background: #fcfdfe; }
+  details.proof-details > summary { cursor: pointer; font-weight: 700; color: #1d2f52; padding: 8px 0; user-select: none; }
+  details.proof-details[open] > summary { border-bottom: 1px dashed var(--line); margin-bottom: 6px; }
+  details.proof-details .proof-body { padding: 2px 2px 10px; }
+
+  /* ---------- 画块证明：红/蓝区域 ---------- */
+  table.ms td.k-red { background: #fdeaea; color: #b00020; font-weight: 800; outline: 2px solid #e6a4a4; outline-offset: -2px; font-style: italic; }
+  table.ms td.k-blue { background: #e9f1fd; color: #0b5cad; font-weight: 800; outline: 2px solid #a9c6ee; outline-offset: -2px; font-style: italic; }
+
+  /* ---------- 快速出数状态条 ---------- */
+  #quickBar { background: #fff; border: 1px solid #bfe3c8; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14.5px; }
+  #quickBar .dim { color: var(--dim); font-size: 13px; }
+
   /* ---------- 打印 ---------- */
   @media print {
     body { background: #fff; }
@@ -116,6 +135,8 @@
     .page.pg-hidden { display: block !important; }
     .blk-h2, .blk-h3 { page-break-after: avoid; }
     table.ms, table.data { page-break-inside: avoid; }
+    details.proof-details > summary { display: none; }
+    details.proof-details { border: none; padding: 0; }
   }
 </style>
 </head>
@@ -136,6 +157,8 @@
         </select>
       </label>
       <label class="chk" title="每填入/修改一个数字后自动重新出数"><input type="checkbox" id="autoSolve" checked> 输入即自动出数</label>
+      <button class="ghost" id="btnUndo" title="Ctrl+Z">↩ 撤回</button>
+      <button class="ghost" id="btnRedo" title="Ctrl+Y">↪ 重做</button>
       <button class="ghost" id="btnBatchToggle">批量填入…</button>
       <button class="ghost" id="btnClear">清空</button>
       <span style="flex:1"></span>
@@ -146,7 +169,7 @@
       <textarea id="batchText" rows="4" placeholder="按行粘贴数字，空格/逗号分隔，空缺用 - 或 . 表示，例如：&#10;2 7 -&#10;- 5 -&#10;- - 9"></textarea>
       <div style="margin-top:4px;"><button class="ghost" id="btnBatchApply">应用到表格</button></div>
     </div>
-    <div class="hint" style="margin-top:6px;">每个格子可填：整数（如 <code>12</code>）、最简或非最简分数（如 <code>1/2</code>、<code>10/4</code>）、小数（如 <code>0.75</code>）、甚至 <code>1.5/2</code>；留空 = 未知。输出时自动选用有效数字更少的表示（平手取最简分数），分数在图中以上下分式呈现。</div>
+    <div class="hint" style="margin-top:6px;">每个格子可填：整数（如 <code>12</code>）、分数（如 <code>1/2</code>、<code>10/4</code>）、小数（如 <code>0.75</code>）、甚至 <code>1.5/2</code>；留空 = 未知。<b>能确定的数会自动回填到填写框</b>（绿色斜体 = 自动推出，直接输入可把它改成已知数，双击可查看证明）；黑色 = 你输入的已知数。<b>↩ 撤回 / ↪ 重做</b>（Ctrl+Z / Ctrl+Y）可回退任何填写操作。输出自动选有效数字更少的表示（平手取最简分数），图中分数以上下分式呈现。</div>
     <div class="hint" style="margin-top:4px;">示例：</div>
     <div class="controls" style="margin-top:2px;">
       <button class="ghost" data-preset="two">三阶·两数定一格</button>
@@ -160,7 +183,8 @@
   </section>
 
   <section id="result">
-    <div class="toolbar no-print">
+    <div id="quickBar" style="display:none" class="no-print"></div>
+    <div class="toolbar no-print" id="toolbar">
       <button class="ghost" id="btnPrev">◀ 上一步</button>
       <span class="pginfo" id="pgInfo">1 / 1</span>
       <button id="btnNext">下一步 ▶</button>
@@ -169,6 +193,7 @@
         <option value="step">分步模式（每页一步）</option>
         <option value="all">一页显示全部证明</option>
       </select>
+      <button class="ghost" id="btnProofs">📖 展开全部证明</button>
       <button class="ghost" id="btnPrint">🖨 打印 / 导出 PDF</button>
       <button class="ghost" id="btnDocx">📄 导出 DOCX</button>
     </div>
@@ -470,7 +495,7 @@
   }
 
   /* ---------------- 常用定理识别（仅用于命名/讲解） ---------------- */
-  const THEOREM_RANK = { 'S-line': 0, 'center-S': 1, 'opposite': 2, 'corner4': 3, 'line-complete': 4 };
+  const THEOREM_RANK = { 'S-line': 0, 'center-S': 1, 'opposite': 2, 'corner4': 3, 'knight3': 4, 'line-complete': 5 };
   function isCorner(model, c) {
     const n = model.n, r = Math.floor(c / n), col = c % n;
     return (r === 0 || r === n - 1) && (col === 0 || col === n - 1);
@@ -510,8 +535,61 @@
         if (rest.length === 2 && model.rot180(rest[0]) === rest[1])
           return { key: 'opposite', name: '对顶定理（三阶）' };
       }
+      // 马步定理：角上的数×2 = 与它成马步的两数之和（2a = f + h 型）
+      if (cells.length === 2) {
+        const trio = [k, cells[0], cells[1]];
+        const corner = trio.find(function (c) { return isCorner(model, c); });
+        if (corner !== undefined) {
+          const r0 = Math.floor(corner / 3), c0 = corner % 3;
+          const k1 = 1 * 3 + (2 - c0);   // (中行, 角列的对列)
+          const k2 = (2 - r0) * 3 + 1;   // (角行的对行, 中列)
+          const s = new Set(trio);
+          if (s.size === 3 && s.has(k1) && s.has(k2))
+            return { key: 'knight3', name: '马步定理（三阶）' };
+        }
+      }
     }
     return null;
+  }
+
+  /* ---------------- 技巧分级与“去交叉”区域 ---------------- */
+  /**
+   * 技巧优先级（证明策略排序用）：
+   *  1 = 幻和直用（单条线的和 = S，即可出数/出 S）
+   *  2 = 两线去交叉：两条线的和相等，去掉交叉格后剩余部分之和相等
+   *  3 = 多线容斥：若干条线的和（各计一次）与另若干条线/总和相等，重叠部分成对抵消
+   *  4 = 一般加权组合
+   */
+  function techniqueClass(lambdaMap) {
+    if (lambdaMap.size === 1) return 1;
+    let allUnit = true;
+    for (const v of lambdaMap.values()) {
+      if (v !== 1 && v !== -1) { allUnit = false; break; }
+    }
+    if (!allUnit) return 4;
+    if (lambdaMap.size === 2) return 2;
+    return 3;
+  }
+  /**
+   * “去交叉”区域：把 λ 为正的线记为红组、负的线记为蓝组（各按次数计入），
+   * 两组公共的格子成对抵消，剩下的即红色部分与蓝色部分。
+   * 恒等式可读成：红色部分（按次数）= 蓝色部分（按次数）+ T×S。
+   */
+  function buildRegions(model, lambdaMap) {
+    const plus = new Map(), minus = new Map(); // cell -> 次数
+    for (const e of lambdaMap) {
+      const mult = e[1] > 0 ? e[1] : -e[1];
+      const tgt = e[1] > 0 ? plus : minus;
+      for (const cell of model.lines[e[0]].cells) tgt.set(cell, (tgt.get(cell) || 0) + mult);
+    }
+    for (const cell of Array.from(plus.keys())) {
+      if (!minus.has(cell)) continue;
+      const m = Math.min(plus.get(cell), minus.get(cell));
+      const a = plus.get(cell) - m, b = minus.get(cell) - m;
+      if (a > 0) plus.set(cell, a); else plus.delete(cell);
+      if (b > 0) minus.set(cell, b); else minus.delete(cell);
+    }
+    return { red: plus, blue: minus };
   }
 
   /* ---------------- 最少已知数（极小前提）搜索 ---------------- */
@@ -623,13 +701,16 @@
             const v = lamVals[q];
             if (v < 0) { lamSum = lamSum - v; } else { lamSum = lamSum + v; }
           }
+          const tech = techniqueClass(id.lambdaMap);   // 技巧分级：1幻和直用 2两线去交叉 3多线容斥 4一般
           const score = [
+            tech,
             thm ? (THEOREM_RANK[thm.key] !== undefined ? THEOREM_RANK[thm.key] : 9) : 9,
             id.lambdaMap.size, lamSum,
             tie.target === SC ? 1 : 0, tie.target
           ];
           if (chosen === null || scoreLess(score, chosen.score)) {
             chosen = { C: C, id: id, thm: thm, score: score };
+            chosen.id.tech = tech;
             chosenTarget = tie.target;
           }
         }
@@ -704,7 +785,11 @@
         value: value, valueStr: fmtNumber(value),
         d: Ceff.length,
         premises: premises,
-        identity: { gamma: id.gamma, T: id.T, terms: termsOrdered, expansion: expansion, lambda: lambdaList },
+        identity: {
+            gamma: id.gamma, T: id.T, terms: termsOrdered, expansion: expansion, lambda: lambdaList,
+            tech: id.tech,
+            regions: id.tech === 2 || id.tech === 3 ? regionsToArrays(buildRegions(model, id.lambdaMap)) : null
+          },
         theorem: thm, refStep: refStep,
         involvedCells: Array.from(involved),
         snapshot: knownEntries.map(function (e) { return { coord: e.coord, valueStr: fmtNumber(known.get(e.coord)), source: e.source }; })
@@ -719,6 +804,53 @@
     let last;
     while (true) { const r = g.next(); if (r.done) { last = r.value; break; } }
     return last;
+  }
+
+
+  function regionsToArrays(reg) {
+    const red = [], blue = [];
+    for (const e of reg.red) red.push({ cell: e[0], count: e[1] });
+    for (const e of reg.blue) blue.push({ cell: e[0], count: e[1] });
+    red.sort(function (a, b) { return a.cell - b.cell; });
+    blue.sort(function (a, b) { return a.cell - b.cell; });
+    return { red: red, blue: blue };
+  }
+
+  /* ---------------- 随机试解验证 ----------------
+   * 从解空间随机取 12 个满足全部已知条件的填法，看哪些格子每次都相等；
+   * 与线性判定交叉校验（两者必须一致）。确定性 LCG，保证可复现。 */
+  function sampleCompletions(model, part, D, determined, givenMap) {
+    if (givenMap.size === 0) return null;
+    const N = model.N;
+    if (D.length === 0) {
+      const stable = [];
+      for (let i = 0; i < N; i++) stable.push(i);
+      return { count: 1, samples: [], stableCells: stable, agreeWithLinear: true, unique: true };
+    }
+    let seed = 20260611;
+    const rnd = function () { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+    const K = 12;
+    const grids = [];
+    const stableFlags = new Array(N).fill(true);
+    for (let t = 0; t < K; t++) {
+      const cells = part.slice(0, N);
+      for (let j = 0; j < D.length; j++) {
+        let c = (rnd() % 7) - 3;
+        if (c === 0 && rnd() % 2 === 0) c = 1;
+        if (c === 0) continue;
+        for (let i = 0; i < N; i++) cells[i] = cells[i].add(D[j][i].mul(new Frac(c)));
+      }
+      grids.push(cells.map(fmtNumber));
+      for (let i = 0; i < N; i++) if (grids[t][i] !== grids[0][i]) stableFlags[i] = false;
+    }
+    let agree = true;
+    const detSet = new Set(determined);
+    for (let i = 0; i < N; i++) {
+      if (detSet.has(i) !== stableFlags[i]) { agree = false; }
+    }
+    const stableCells = [];
+    for (let i = 0; i < N; i++) if (stableFlags[i]) stableCells.push(i);
+    return { count: K, samples: [grids[0], grids[1], grids[2]], stableCells: stableCells, agreeWithLinear: agree, unique: false };
   }
 
   /* ---------------- 对外主接口 ---------------- */
@@ -749,6 +881,7 @@
     const known = ded.known;
 
     const complete = determined.filter(function (c) { return c !== SC; }).length === N;
+    const sampling = sampleCompletions(model, part, D, determined, givenMap);
     const undeterminedCells = [];
     for (let c = 0; c < N; c++) if (!known.has(c)) undeterminedCells.push(c);
 
@@ -798,6 +931,7 @@
       undeterminedCells: undeterminedCells,
       determinedCount: determined.length,
       examples: examples,
+      sampling: sampling,
       verification: verification,
       error: null
     };
@@ -931,6 +1065,16 @@
     });
     return out === '' ? '0' : out;
   }
+
+  function regionCellStr(model, e) {
+    if (e.count > 1) return e.count + '·' + model.letters[e.cell];
+    return model.letters[e.cell];
+  }
+  function eqEqSafe(t) { return t; }
+  function regionStr(model, arr) {
+    if (!arr || arr.length === 0) return '0';
+    return arr.map(function (e) { return regionCellStr(model, e); }).join(' + ');
+  }
   function coeffListStr(lambda) { // "(+1 − 1 …)"
     const parts = lambda.map(function (L) {
       if (L.coeff < 0) { return String(L.coeff); }
@@ -956,6 +1100,7 @@
     'S-line': '幻和定理：S 就等于任何一条完整线上 n 个数之和。',
     'line-complete': '补线法：一条线上只缺一格时，缺格 = S − 其余格之和。',
     'opposite': '对顶定理：三阶幻方中，过中心的同一条线上，与中心对称的两格之和恰为中心的 2 倍。',
+    'knight3': '马步定理（三阶）：角上那个数的 2 倍 = 与它成马步的两格之和。证明思路：过该角的三条线之和 = 3S，全部数之和 = 3S，重叠部分成对抵消即得——这正是“多线去交叉”技巧。',
     'center-S': '中心定理：奇数阶幻方的中心 = S/n（即 n×中心 = S）。',
     'corner4': '四角和定理：四阶幻方四个角上的数之和恰为幻和 S。'
   };
@@ -963,6 +1108,7 @@
     'S-line': '幻和等于任何一条完整线的和，这已在第{j}步证明；对本题的这条线即得',
     'line-complete': '补线法已在第{j}步证明；对本题的这条线即得',
     'opposite': '对顶定理已在第{j}步证明；把其中关于中心对称的两格换成本题的相应格子，即得',
+    'knight3': '马步定理已在第{j}步证明；把其中的角格与两个马步格换成本题的相应格子，即得',
     'center-S': '中心定理已在第{j}步证明；这里直接得到',
     'corner4': '四角和定理已在第{j}步证明；这里直接得到'
   };
@@ -1006,18 +1152,20 @@
     bl.push(P(B('结论：'), S('只用 ' + step.d + ' 个已知的数 —— ' + premDesc + ' —— 就能唯一确定 ' + (step.isS ? '幻和 S' : '格子 ' + step.label) + ' 的值：'), B(step.label + ' = ' + step.valueStr + '。')));
     if (step.theorem) bl.push(P(S('（' + step.theorem.name + '：' + THEOREM_NOTE[step.theorem.key] + '）', { cls: 'dim' })));
 
-    // 证明
-    bl.push(H3('证明（对任意 ' + n + ' 阶幻方成立）'));
-    bl.push(P(S('先证一条与具体数字无关的结论。下图给出证明中要用到的格子字母（“·”表示本步用不到）：')));
-    bl.push(letterGrid(model, step.involvedCells));
+    // 证明（默认折叠，可展开；打印/导出时自动展开）
+    const pb = [];
+    pb.push(P(S('先证一条与具体数字无关的结论。下图给出证明中要用到的格子字母（“·”表示本步用不到，只标注涉及到的格子）：')));
+    pb.push(letterGrid(model, step.involvedCells));
     if (step.refStep) {
       const ref = result.steps[step.refStep - 1];
       const sent = (REF_SENTENCE[step.theorem ? step.theorem.key : 'sig'] || '第{j}步已证同样的关系；这里对应地得到').replace('{j}', String(step.refStep));
-      bl.push(P(S('本步用到的结论已经在' + (ref.theorem ? '第 ' + step.refStep + ' 步（' + ref.theorem.name + '）' : '第 ' + step.refStep + ' 步') + '证明过：那里证明了 '), B(ref ? identityStr(ref) : ''), S('。' + sent + '：'), B(identityStr(step) + '。')));
+      pb.push(P(S('本步用到的结论已经在' + (ref.theorem ? '第 ' + step.refStep + ' 步（' + ref.theorem.name + '）' : '第 ' + step.refStep + ' 步') + '证明过：那里证明了 '), B(ref ? identityStr(ref) : ''), S('。' + sent + '：'), B(identityStr(step) + '。')));
     } else {
       const lam = step.identity.lambda;
-      bl.push(P(S(n + ' 阶幻方中，每条行、列及两条对角线的和都等于同一个幻和 S。本步用到下列线（系数用于加权求和）：')));
-      bl.push(TBL(
+      const T = step.identity.T;
+      const tech = step.identity.tech || 4;
+      pb.push(P(S(n + ' 阶幻方中，每条行、列及两条对角线的和都等于同一个幻和 S。本步用到下列线（系数用于加权求和）：')));
+      pb.push(TBL(
         [S('系数'), S('这条线的和'), S('是哪条线')],
         lam.map(function (L) {
           let coeffStr;
@@ -1025,21 +1173,54 @@
           return [S(coeffStr), S('(' + L.cells.map(function (c) { return model.letters[c]; }).join(' + ') + ')'), S(L.name)];
         })
       ));
-      const T = step.identity.T;
-      bl.push(P(S('把它们按系数加权相加：左边 = '), B(expansionStr(step)), S('；右边 = ' + coeffListStr(lam) + '×S = ' + T + '×S。')));
-      bl.push(P(S('于是 '), B(expansionStr(step) + ' = ' + T + '×S'), S('，移项整理得'), B('　' + identityStr(step) + '　'), S('。证毕。∎')));
-      // 通俗解释
+
+      // 技巧一（幻和直用）/ 技巧二（两线去交叉）/ 技巧三（多线容斥）：画块示意
+      const reg = step.identity.regions;
+      if (reg && (reg.red.length || reg.blue.length)) {
+        const redSet = new Map(reg.red.map(function (e) { return [e.cell, e.count]; }));
+        const blueSet = new Map(reg.blue.map(function (e) { return [e.cell, e.count]; }));
+        const cells = [];
+        for (let i = 0; i < model.N; i++) {
+          if (redSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: redSet.get(i) }), kind: 'red' });
+          else if (blueSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: blueSet.get(i) }), kind: 'blue' });
+          else cells.push({ text: '·', kind: 'dot' });
+        }
+        pb.push(P(S(tech === 2
+          ? '画块示意（两线去交叉）：两条线的和相等，先去掉它们的交叉格（两边各一个，正好抵消），剩下的红、蓝两部分的和也相等：'
+          : '画块示意（多线去交叉）：把系数为正的线相加、系数为负的线相减，重叠的格子成对抵消，只剩下红色的格子与蓝色的格子（×n 表示出现 n 次）：')));
+        pb.push(GRID(model.n, cells, [
+          S('红色部分的和', { cls: 'err', b: 1 }), S(' = ', { b: 1 }),
+          S('蓝色部分的和' + (T === 0 ? '' : ' + ' + T + '×S'), { cls: 'given', b: 1 }),
+          S('　（灰点 = 已抵消/未涉及的格子）')
+        ]));
+        const redEq = regionStr(model, reg.red);
+        const blueEq = regionStr(model, reg.blue);
+        let eqText = redEq + ' = ';
+        if (T === 0) eqText += blueEq;
+        else eqText += (reg.blue.length ? blueEq + ' + ' : '') + T + '×S';
+        pb.push(P(S('用字母写就是：'), B(eqEqSafe(eqText)), S('，整理即得'), B('　' + identityStr(step) + '　'), S('。')));
+      }
+
+      pb.push(P(S('把它们按系数加权相加：左边 = '), B(expansionStr(step)), S('；右边 = ' + coeffListStr(lam) + '×S = ' + T + '×S。')));
+      pb.push(P(S('于是 '), B(expansionStr(step) + ' = ' + T + '×S'), S('，移项整理得'), B('　' + identityStr(step) + '　'), S('。证毕。∎')));
+      // 通俗解释（按技巧分级给说法）
       const posL = lam.filter(function (L) { return L.coeff > 0; }).map(function (L) { return L.name; });
       const negL = lam.filter(function (L) { return L.coeff < 0; }).map(function (L) { return L.name; });
       let col;
-      if (T === 0) {
-        col = '通俗地说：这些线的和全是同一个数 S。把带正号的线（' + posL.join('、') + '）的“和”全部加起来，再减去带负号的线（' + (negL.join('、') || '无') + '）的“和”，因为正、负系数的总数相同，右边的 S 恰好全部抵消；左边逐个字母清点，出现次数相同的字母相互抵消，只剩下 ' + expansionStr(step) + ' = 0，即 ' + identityStr(step) + '。';
+      if (tech === 1) {
+        col = '通俗地说：这条线上 ' + n + ' 个数的和就是幻和 S，所以线上缺哪个数，用 S 减去其余的数就得到了。';
+      } else if (reg && (reg.red.length || reg.blue.length)) {
+        const rs = regionStr(model, reg.red), bs = regionStr(model, reg.blue);
+        col = '通俗地说：每条线的和都等于 S，所以“红线组加起来”与“蓝线组加起来”里的重叠格子两边各出现同样多次，互相抵消（容斥），剩下：' + rs + ' = ' + (T === 0 ? bs : bs + ' + ' + T + '×S') + '。这就是“去掉交叉部分，剩余部分之和相等”的技巧。';
+      } else if (T === 0) {
+        col = '通俗地说：这些线的和全是同一个数 S。把带正号的线（' + posL.join('、') + '）的“和”全部加起来，再减去带负号的线（' + (negL.join('、') || '无') + '）的“和”，右边的 S 恰好全部抵消；左边逐个字母清点，出现次数相同的字母相互抵消，只剩下 ' + expansionStr(step) + ' = 0，即 ' + identityStr(step) + '。';
       } else {
-        col = '通俗地说：这些线的和全是同一个数 S。把它们按系数加权相加，右边就是 ' + T + '×S；左边逐个字母清点、合并同类项，得到 ' + expansionStr(step) + '。两边相等并移项，就得到 ' + identityStr(step) + '。式中的 S 是幻和——它要么已在前面求出，要么可由本式与其它已知联立求出。';
+        col = '通俗地说：这些线的和全是同一个数 S。把它们按系数加权相加，右边就是 ' + T + '×S；左边逐个字母清点、合并同类项，得到 ' + expansionStr(step) + '。两边相等并移项，就得到 ' + identityStr(step) + '。';
       }
       col += '这个关系对任何 ' + n + ' 阶幻方都成立。';
-      bl.push(P(S(col, { cls: 'dim' })));
+      pb.push(P(S(col, { cls: 'dim' })));
     }
+    bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: pb });
 
     // 运用
     bl.push(H3('运用（代入本题数字）'));
@@ -1097,7 +1278,9 @@
     bl.push(P(S('按行的顺序给每个格子一个字母（下图），后文用字母指代格子；S 表示幻和。')));
     bl.push(letterGrid(model, Array.from({ length: model.N }, function (_, i) { return i; })));
     bl.push(H3('思路'));
-    bl.push(P(S('任何 ' + n + ' 阶幻方的全部填法共有 '), B(model.m + ' 个自由参数'), S('。若某格在“满足全部已知条件的所有填法”中取值都相同，它就是可确定的。下面从'), B('需要已知数最少'), S('的结论开始：每一步先证明一条对任意幻方都成立的恒等式（用字母，与具体数字无关），再代入本题数字，从而“出数”一个格子；如此逐步推出所有能确定的格子。即使已知数不足以解出整个幻方，凡能确定的格子都会被推出。')));
+    bl.push(P(S('任何 ' + n + ' 阶幻方的全部填法共有 '), B(model.m + ' 个自由参数'), S('。若某格在“满足全部已知条件的所有填法”中取值都相同，它就是可确定的。下面从'), B('需要已知数最少'), S('的结论开始：每一步先证明一条对任意幻方都成立的恒等式（用字母，与具体数字无关），再代入本题数字，从而“出数”一个格子；如此逐步推出所有能确定的格子。即使已知数不足以解出整个幻方，凡能确定的格子都会被推出。'),
+      S('输入时程序处于快速模式：只把能确定的数自动回填到填写框（不展示证明）；点'), B('“求 解”'), S('后才给出完整的逐步证明（证明默认折叠，点击可展开；每步只标注该步涉及的格子字母）。'),
+      S('证明按技巧从简到难选择：能用幻和直出的优先，其次是“两线去交叉”“多线去交叉（容斥）”等组合技巧，并尽量配画块示意（红色部分 = 蓝色部分）。')));
     return bl;
   }
 
@@ -1125,6 +1308,26 @@
             return { text: t, kind: isUnd ? 'diff' : (isGiv ? 'given' : 'derived') };
           });
           bl.push(GRID(n, cells, [S('填法' + '一二'.charAt(i) + '（幻和 S = ' + ex.S + '）')]));
+        }
+      }
+    }
+
+    // 随机试解验证
+    const sp = result.sampling;
+    if (sp) {
+      bl.push(H3('随机试解验证（换个角度看“能否确定”）'));
+      if (sp.unique) {
+        bl.push(P(S('在全部已知条件下随机试解：无论怎么取，只能得到同一组数——说明每个格子都被唯一确定（这也与上面逐格推出的结果一致）。')));
+      } else {
+        const stable = new Set(sp.stableCells);
+        bl.push(P(S('在满足全部已知条件的解空间里随机取了 '), B(sp.count + ' 组'), S(' 解（下面展示其中 3 组；红色 = 各次取值不同的格子，绿色 = 每次都相同的格子）：')));
+        bl.push(P(S('每次都取相同值的格子，恰好就是上面推出的那些格子（与线性判定' + (sp.agreeWithLinear ? '完全一致 ✓' : '不一致 ✗（不应发生）') + '）。这正说明：往这些格子里填别的数字就无解——它们是确定解，所以程序自动填上了；红色格子还能变，说明现有已知数定不住它们。')));
+        for (let q = 0; q < sp.samples.length; q++) {
+          const cells = sp.samples[q].map(function (t, idx) {
+            const isGiv = result.givens.some(function (g) { return g.coord === idx; });
+            return { text: t, kind: isGiv ? 'given' : (stable.has(idx) ? 'derived' : 'diff') };
+          });
+          bl.push(GRID(n, cells, [S('随机解 ' + (q + 1) + ' / ' + sp.count)]));
         }
       }
     }
@@ -1293,7 +1496,7 @@
     ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(function (s) {
       return '<w:' + s + ' w:val="single" w:sz="4" w:space="0" w:color="999999"/>';
     }).join('') + '</w:tblBorders>';
-  const GRID_FILL = { given: 'DCE9F8', derived: 'DFF0E3', new: 'FFF3C4', diff: 'FBE2E2' };
+  const GRID_FILL = { given: 'DCE9F8', derived: 'DFF0E3', new: 'FFF3C4', diff: 'FBE2E2', red: 'FBDADA', blue: 'DCE8FA' };
   const GRID_COLOR = { letter: '808080', dot: 'C0C0C0', unknown: '808080' };
 
   /* 分数文本 → {sign, num, den}；非分数返回 null */
@@ -1324,7 +1527,7 @@
         const cell = block.cells[r * n + c] || { text: '', kind: 'dot' };
         let shd = GRID_FILL[cell.kind] ? '<w:shd w:val="clear" w:fill="' + GRID_FILL[cell.kind] + '"/>' : '';
         const rpr = (GRID_COLOR[cell.kind] ? '<w:color w:val="' + GRID_COLOR[cell.kind] + '"/>' : '') +
-          (cell.kind === 'letter' || cell.kind === 'unknown' ? '<w:i/>' : '') + SZ(maxM >= 5 ? 16 : 20);
+          (cell.kind === 'letter' || cell.kind === 'unknown' || cell.kind === 'red' || cell.kind === 'blue' ? '<w:i/>' : '') + (cell.kind === 'red' || cell.kind === 'blue' ? '<w:b/>' : '') + SZ(maxM >= 5 ? 16 : 20);
         let inner;
         const f = (cell.kind === 'given' || cell.kind === 'derived' || cell.kind === 'new') ? parseFrac(cell.text) : null;
         if (f) {
@@ -1377,19 +1580,29 @@
     return xml;
   }
 
-  function blocksToBodyXml(pages) {
+  function renderBlocks(blocks) {
     let body = '';
-    pages.forEach(function (blocks, pi) {
-      if (pi > 0) body += '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
-      for (const b of blocks) {
+    for (const b of blocks) {
         if (b.t === 'title') body += para('<w:r><w:rPr><w:b/>' + SZ(34) + '</w:rPr><w:t xml:space="preserve">' + esc(b.text) + '</w:t></w:r>', { spacing: 160 });
         else if (b.t === 'h2') body += para('<w:r><w:rPr><w:b/>' + SZ(28) + '</w:rPr><w:t xml:space="preserve">' + esc(b.text) + '</w:t></w:r>', { h: 1, spacing: 160 });
         else if (b.t === 'h3') body += para('<w:r><w:rPr><w:b/>' + SZ(23) + '</w:rPr><w:t xml:space="preserve">' + esc(b.text) + '</w:t></w:r>', { h: 2, spacing: 140 });
         else if (b.t === 'p') body += para(b.segs.map(function (s) { return runXml(s, SZ(21)); }).join(''));
         else if (b.t === 'grid') body += gridXml(b);
         else if (b.t === 'table') body += tableXml(b);
+        else if (b.t === 'proof') {
+          body += para('<w:r><w:rPr><w:b/>' + SZ(23) + '</w:rPr><w:t xml:space="preserve">证明（对任意 ' + esc(b.title || '幻方') + '成立）</w:t></w:r>', { h: 2, spacing: 140 });
+          body += renderBlocks(b.blocks);
+        }
         else if (b.t === 'pagebreak') { /* 已按页分隔 */ }
-      }
+    }
+    return body;
+  }
+
+  function blocksToBodyXml(pages) {
+    let body = '';
+    pages.forEach(function (blocks, pi) {
+      if (pi > 0) body += '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+      body += renderBlocks(blocks);
     });
     return body;
   }
@@ -1433,12 +1646,100 @@
 
 </script>
 <script>
-/* app.js —— 界面逻辑：输入（自动出数）、求解、点击查阅推导、分页、打印、导出 */
+/* app.js —— 界面逻辑：输入即出数（回填填写框）、撤回/重做、点击查阅推导、
+ *           快速模式（仅出数）/完整模式（点“求解”看逐步证明，证明默认折叠）、分页、导出 */
 (function () {
   'use strict';
   const $ = function (id) { return document.getElementById(id); };
 
-  const state = { n: 3, pages: [], current: 0, mode: 'step', result: null, token: 0, autoT: null };
+  const state = {
+    n: 3, pages: [], current: 0, mode: 'step', result: null, token: 0, autoT: null,
+    grid: { values: [], derived: [] },   // 填写框镜像：values=框内文本，derived=是否自动回填（非用户手输）
+    history: [], redoStack: [], lastHist: null,
+    view: 'none'                          // none | quick | full
+  };
+
+  /* ---------------- 填写框状态 / 撤回·重做 ---------------- */
+  function gridSnapshot() {
+    return { values: state.grid.values.slice(), derived: state.grid.derived.slice() };
+  }
+  function pushHistory(cellIdx) {
+    const now = Date.now();
+    if (cellIdx != null && state.lastHist && state.lastHist.cell === cellIdx && now - state.lastHist.t < 1200) {
+      state.lastHist.t = now; return;   // 同一格连续输入合并为一条历史
+    }
+    state.history.push(gridSnapshot());
+    if (state.history.length > 120) state.history.shift();
+    state.redoStack.length = 0;
+    state.lastHist = cellIdx != null ? { cell: cellIdx, t: now } : null;
+    updateUndoButtons();
+  }
+  function applySnapshot(snap) {
+    state.grid.values = snap.values.slice();
+    state.grid.derived = snap.derived.slice();
+    writeInputsFromState();
+    updateUndoButtons();
+    scheduleAuto(0);
+  }
+  function undoGrid() {
+    if (!state.history.length) return;
+    state.redoStack.push(gridSnapshot());
+    applySnapshot(state.history.pop());
+    state.lastHist = null;
+  }
+  function redoGrid() {
+    if (!state.redoStack.length) return;
+    state.history.push(gridSnapshot());
+    applySnapshot(state.redoStack.pop());
+    state.lastHist = null;
+  }
+  function updateUndoButtons() {
+    $('btnUndo').disabled = state.history.length === 0;
+    $('btnRedo').disabled = state.redoStack.length === 0;
+  }
+  function writeInputsFromState() {
+    const inputs = $('gridBox').querySelectorAll('input');
+    inputs.forEach(function (inp) {
+      const i = Number(inp.dataset.idx);
+      inp.value = state.grid.values[i] || '';
+      inp.classList.remove('bad');
+      inp.classList.toggle('derived-val', !!state.grid.derived[i]);
+    });
+  }
+  /* 把“能确定的数”回填到填写框；不再可定的自动清除 */
+  function autofillDerived(result) {
+    const inputs = $('gridBox').querySelectorAll('input');
+    for (let i = 0; i < result.finalCells.length; i++) {
+      const fc = result.finalCells[i];
+      const inp = inputs[i];
+      if (fc && (state.grid.derived[i] || state.grid.values[i] === '')) {
+        if (state.grid.values[i] !== fc.valueStr) {
+          state.grid.values[i] = fc.valueStr;
+          inp.value = fc.valueStr;
+          inp.classList.add('just-filled');
+          setTimeout(function () { inp.classList.remove('just-filled'); }, 700);
+        }
+        state.grid.derived[i] = true;
+        inp.classList.add('derived-val');
+      } else if (!fc && state.grid.derived[i]) {
+        state.grid.values[i] = '';
+        state.grid.derived[i] = false;
+        inp.value = '';
+        inp.classList.remove('derived-val');
+      }
+    }
+  }
+  function clearAllDerived() {
+    const inputs = $('gridBox').querySelectorAll('input');
+    for (let i = 0; i < state.grid.derived.length; i++) {
+      if (state.grid.derived[i]) {
+        state.grid.values[i] = '';
+        state.grid.derived[i] = false;
+        inputs[i].value = '';
+        inputs[i].classList.remove('derived-val');
+      }
+    }
+  }
 
   /* ---------------- 输入表格（正方形格子） ---------------- */
   function lettersFor(n) {
@@ -1449,6 +1750,10 @@
 
   function buildInputs(n) {
     state.n = n;
+    state.grid.values = new Array(n * n).fill('');
+    state.grid.derived = new Array(n * n).fill(false);
+    state.history = []; state.redoStack = []; state.lastHist = null;
+    updateUndoButtons();
     const box = $('gridBox');
     box.innerHTML = '';
     const tb = document.createElement('table');
@@ -1464,6 +1769,7 @@
         inp.type = 'text';
         inp.dataset.idx = String(r * n + c);
         inp.setAttribute('placeholder', '·');
+        inp.title = '可填整数/分数/小数；绿色斜体 = 自动推出（双击看证明），直接输入即变为已知数';
         inp.addEventListener('keydown', function (e) {
           if (e.key === 'Enter') { e.preventDefault(); solve(); }
           if (e.key === 'ArrowRight' && this.selectionStart === this.value.length) { moveFocus(r, c + 1); }
@@ -1471,10 +1777,24 @@
           if (e.key === 'ArrowUp') { moveFocus(r - 1, c); }
           if (e.key === 'ArrowDown') { moveFocus(r + 1, c); }
         });
-        // 输入即自动出数（防抖）
+        // 输入即自动出数（防抖）；手输即视为“已知数”（覆盖自动回填）
         inp.addEventListener('input', function () {
+          const idx = Number(this.dataset.idx);
+          pushHistory(idx);
           this.classList.remove('bad');
+          state.grid.values[idx] = this.value.trim();
+          if (state.grid.derived[idx]) {
+            state.grid.derived[idx] = false;
+            this.classList.remove('derived-val');
+          }
           scheduleAuto();
+        });
+        // 双击自动回填的数 → 查看该数的推导证明
+        inp.addEventListener('dblclick', function () {
+          const idx = Number(this.dataset.idx);
+          if (!state.grid.derived[idx] || !state.result) return;
+          const fc = state.result.finalCells[idx];
+          if (fc && fc.source != null) openStepModal(fc.source);
         });
         td.appendChild(lab); td.appendChild(inp);
         tr.appendChild(td);
@@ -1489,12 +1809,16 @@
     }
   }
 
-  function setGrid(values) { // values: array length n²（字符串或 null）
+  function setGrid(values) { // 用户动作（预设/批量/清空后调用）
     const inputs = $('gridBox').querySelectorAll('input');
     inputs.forEach(function (inp) {
-      const v = values[Number(inp.dataset.idx)];
-      inp.value = v == null ? '' : String(v);
+      const i = Number(inp.dataset.idx);
+      const v = values[i];
+      state.grid.values[i] = v == null ? '' : String(v);
+      state.grid.derived[i] = false;
+      inp.value = state.grid.values[i];
       inp.classList.remove('bad');
+      inp.classList.remove('derived-val');
     });
     scheduleAuto(0);
   }
@@ -1517,7 +1841,6 @@
 
   async function randomPuzzle(n) {
     const model = MagicCore.buildModel(n);
-    // 随机系数组合出一组幻方（含 S），再整体平移使数字偏“好看”
     const F = MagicCore.Frac;
     let cells = new Array(model.N).fill(new F(0)), S = new F(0);
     const rnd = function (lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); };
@@ -1529,7 +1852,6 @@
     const shift = rnd(1, 6);
     for (let i = 0; i < model.N; i++) cells[i] = cells[i].add(new F(shift));
     S = S.add(new F(shift * n));
-    // 贪心挑选一个“足以定全部”的已知格集合（分片让出主线程）
     let idxs = Array.from({ length: model.N }, function (_, i) { return i; });
     for (let i = idxs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = idxs[i]; idxs[i] = idxs[j]; idxs[j] = t; }
     let keep = idxs.slice();
@@ -1553,22 +1875,32 @@
         buildInputs(n);
         btn.disabled = true; btn.textContent = '生成中…';
         const vals = await randomPuzzle(n);
+        pushHistory();
         setGrid(vals);
         btn.disabled = false; btn.textContent = '随机出题';
       } else {
         const p = PRESETS[key];
         $('selN').value = String(p.n);
         buildInputs(p.n);
+        pushHistory();
         setGrid(p.cells);
       }
       $('inputErr').textContent = '';
     });
   });
 
-  $('selN').addEventListener('change', function () { buildInputs(Number(this.value)); scheduleAuto(0); });
+  $('selN').addEventListener('change', function () {
+    buildInputs(Number(this.value));
+    setQuickBar(null);
+    scheduleAuto(0);
+  });
+  $('btnUndo').addEventListener('click', undoGrid);
+  $('btnRedo').addEventListener('click', redoGrid);
   $('btnClear').addEventListener('click', function () {
+    pushHistory();
     setGrid(new Array(state.n * state.n).fill(''));
     $('inputErr').textContent = '';
+    setQuickBar(null);
   });
   $('btnBatchToggle').addEventListener('click', function () {
     const b = $('batchBox'); b.style.display = b.style.display === 'none' ? '' : 'none';
@@ -1587,6 +1919,7 @@
         vals[r * n + c] = (tok === '-' || tok === '.') ? '' : tok;
       });
     });
+    pushHistory();
     setGrid(vals);
   });
 
@@ -1602,13 +1935,15 @@
     const errs = [];
     $('gridBox').querySelectorAll('input').forEach(function (inp) {
       inp.classList.remove('bad');
+      const idx = Number(inp.dataset.idx);
       const raw = inp.value.trim();
       if (raw === '') return;
+      if (state.grid.derived[idx]) return;   // 自动回填的数不作为已知数（保持“推导”的教学过程）
       try {
-        given.set(Number(inp.dataset.idx), MagicCore.parseNumberString(raw));
+        given.set(idx, MagicCore.parseNumberString(raw));
       } catch (e) {
         inp.classList.add('bad');
-        errs.push('第' + (Math.floor(Number(inp.dataset.idx) / n) + 1) + '行第' + (Number(inp.dataset.idx) % n + 1) + '列：' + e.message);
+        errs.push('第' + (Math.floor(idx / n) + 1) + '行第' + (idx % n + 1) + '列：' + e.message);
       }
     });
     if (errs.length) { $('inputErr').textContent = errs.join('\n'); return; }
@@ -1622,17 +1957,34 @@
       });
       if (tok !== state.token) { btn.disabled = false; btn.textContent = '求 解'; return; }
       btn.disabled = false; btn.textContent = '求 解';
-      if (!result.ok) { $('inputErr').textContent = result.error; return; }
+      if (!result.ok) {
+        clearAllDerived();
+        setQuickBar(null);
+        $('inputErr').textContent = result.error;
+        return;
+      }
       state.result = result;
+      autofillDerived(result);
+
+      if (opts.auto) {
+        // 快速模式：只出数（回填填写框）+ 状态条；不给证明过程
+        setQuickBar(result);
+        return;
+      }
+      // 完整模式：点“求解”后给出逐步证明（证明默认折叠）
+      setQuickBar(null);
       const doc = MagicRender.buildDocument(result);
       state.pages = doc.pages;
-      // 自动模式：保留当前浏览位置（截断到新页数）；手动模式：回到第 1 页
-      state.current = opts.auto ? Math.min(state.current, state.pages.length - 1) : 0;
-      if (!opts.auto) { state.mode = 'step'; $('selMode').value = 'step'; }
+      state.current = 0;
+      state.mode = 'step';
+      $('selMode').value = 'step';
       await renderPages();
       if (tok !== state.token) return;
       $('result').style.display = 'block';
-      if (!opts.auto) $('result').scrollIntoView({ behavior: 'instant', block: 'start' });
+      $('quickBar').style.display = 'none';
+      $('toolbar').style.display = '';
+      $('pages').style.display = '';
+      $('result').scrollIntoView({ behavior: 'instant', block: 'start' });
     } catch (e) {
       if (tok !== state.token) { btn.disabled = false; btn.textContent = '求 解'; return; }
       btn.disabled = false; btn.textContent = '求 解';
@@ -1640,6 +1992,36 @@
     }
   }
   $('btnSolve').addEventListener('click', function () { solve(); });
+
+  /* 快速模式状态条 */
+  function setQuickBar(result) {
+    const bar = $('quickBar');
+    const toolbar = $('toolbar');
+    if (!result) {
+      bar.style.display = 'none';
+      if (state.view === 'full') return;
+      toolbar.style.display = 'none';
+      $('pages').style.display = 'none';
+      state.view = 'none';
+      return;
+    }
+    state.view = 'quick';
+    toolbar.style.display = 'none';
+    $('pages').style.display = 'none';
+    const det = result.finalCells.filter(Boolean).length;
+    let html = '';
+    if (result.complete) {
+      html += '<b>已全部解出！</b>' + result.model.N + ' 个格子都已确定并自动填入（蓝色=你输入的，绿色=自动推出）。';
+    } else {
+      html += '当前能确定 <b>' + det + ' / ' + result.model.N + '</b> 个格子，已自动填入填写框；其余 ' +
+        result.undeterminedCells.length + ' 格在现有已知下无法唯一确定（剩 ' + result.dimFree + ' 个自由参数）。';
+    }
+    html += result.S ? '　幻和 S = <b>' + result.S.valueStr + '</b>。' : '　幻和 S 尚未确定。';
+    html += '<br><span class="dim">点 <b>“求 解”</b> 查看逐步最简证明（含字母推导与画块示意，证明默认折叠）；双击绿色数字可查看它的推导依据。</span>';
+    bar.innerHTML = html;
+    bar.style.display = '';
+    $('result').style.display = 'block';
+  }
 
   /* ---------------- 页面渲染 ---------------- */
   function el(tag, cls, text) {
@@ -1663,7 +2045,6 @@
     const sign = m[1] ? '<span class="fsign">−</span>' : '';
     return sign + '<span class="frac"><span class="num">' + m[2] + '</span><span class="den">' + m[3] + '</span></span>';
   }
-  /* 格子内容的“宽度量”：分数按分子分母较长者计 */
   function cellMetric(t) {
     const m = /^(-?)(\d+)\/(\d+)$/.exec(t);
     if (m) return Math.max(m[2].length, m[3].length) + (m[1] ? 1 : 0) + 1;
@@ -1682,6 +2063,19 @@
     if (b.t === 'h2') { pageDiv.appendChild(el('div', 'blk-h2', b.text)); return; }
     if (b.t === 'h3') { pageDiv.appendChild(el('div', 'blk-h3', b.text)); return; }
     if (b.t === 'p') { const p = el('p', 'blk-p'); renderSegs(p, b.segs); pageDiv.appendChild(p); return; }
+    if (b.t === 'proof') {
+      // 证明区：默认折叠、可展开（打印/导出时自动展开）
+      const det = document.createElement('details');
+      det.className = 'proof-details';
+      const sum = document.createElement('summary');
+      sum.textContent = '▶ 证明（对任意 ' + (b.title || '幻方') + '成立）——点击展开 / 再次点击折叠';
+      det.appendChild(sum);
+      const body = el('div', 'proof-body');
+      for (const sub of b.blocks) renderBlock(body, sub);
+      det.appendChild(body);
+      pageDiv.appendChild(det);
+      return;
+    }
     if (b.t === 'grid' || b.t === 'table') {
       const tb = document.createElement('table');
       tb.className = b.t === 'grid' ? 'ms' : 'data';
@@ -1695,7 +2089,6 @@
             td.className = 'k-' + (cell.kind || 'dot');
             const fh = (cell.kind === 'given' || cell.kind === 'derived' || cell.kind === 'new') ? fracHtml(cell.text) : null;
             if (fh) td.innerHTML = fh; else td.textContent = cell.text;
-            // 推出的数可点击查阅依据
             if ((cell.kind === 'derived' || cell.kind === 'new') && cell.source != null) {
               td.classList.add('clickable');
               td.dataset.step = String(cell.source);
@@ -1757,6 +2150,18 @@
   });
   $('selMode').addEventListener('change', function () { state.mode = this.value; applyMode(); });
 
+  /* 展开全部证明 / 折叠全部证明 */
+  $('btnProofs').addEventListener('click', function () {
+    const all = document.querySelectorAll('#pages details.proof-details');
+    let anyClosed = false;
+    all.forEach(function (d) { if (!d.open) anyClosed = true; });
+    all.forEach(function (d) { d.open = anyClosed; });
+    $('btnProofs').textContent = anyClosed ? '📕 折叠全部证明' : '📖 展开全部证明';
+  });
+  window.addEventListener('beforeprint', function () {
+    document.querySelectorAll('#pages details.proof-details').forEach(function (d) { d.open = true; });
+  });
+
   /* ---------------- 点击查阅：这个数根据哪几个数推出 ---------------- */
   $('pages').addEventListener('click', function (ev) {
     const td = ev.target.closest('td[data-step]');
@@ -1782,7 +2187,6 @@
     title.textContent = '这个数是根据哪几个数推出的？——' + (st.isS ? '幻和 S' : '格子 ' + st.label + '（第' + st.cell.r + '行第' + st.cell.c + '列）') + ' = ' + st.valueStr + '（第 ' + st.i + ' 步）';
     box.appendChild(title);
 
-    // 一句话来源链
     const p = el('p', 'blk-p');
     renderSegs(p, [
       { text: '根据 ' },
@@ -1795,10 +2199,11 @@
     ]);
     box.appendChild(p);
 
-    // 完整证明与运用（复用该步的文档块；跳过重复的 h2 标题）
     const blocks = MagicRender.stepBlocks(state.result, st);
     const body = document.createElement('div');
     for (let i = 1; i < blocks.length; i++) renderBlock(body, blocks[i]);
+    // 弹窗内证明直接展开（用户就是来看证明的）
+    body.querySelectorAll('details.proof-details').forEach(function (d) { d.open = true; });
     box.appendChild(body);
     mask.appendChild(box);
     document.body.appendChild(mask);
@@ -1809,6 +2214,8 @@
       if (m) m.remove();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undoGrid(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redoGrid(); return; }
     if ($('result').style.display === 'none' || state.mode !== 'step') return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     if (e.key === 'ArrowRight' || e.key === 'PageDown') $('btnNext').click();
@@ -1834,6 +2241,7 @@
 
   /* ---------------- 初始化 ---------------- */
   buildInputs(3);
+  updateUndoButtons();
 })();
 
 </script>
