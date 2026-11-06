@@ -33,6 +33,23 @@ eq(Core.fmtNumber(F(-11, 50)), '-0.22', 'fmt -11/50 → -0.22');
 eq(Core.fmtNumber(F(-23, 12)), '-23/12', 'fmt -23/12');
 eq(Core.fmtNumber(F(10, 4)), '5/2', 'fmt 10/4 化简后 5/2');
 ok(Core.parseNumberString('1/3').equals(Core.parseNumberString('0.3333')) === false, '有限小数≠1/3');
+// 长小数回归：exactDecimal 曾用浮点乘法产出 '0.01.4…e+21' 坏串（f.n*10^k 超 2^53 失真）
+eq(Core.fmtNumber(Core.parseNumberString('.00000014789577')), '0.00000014789577', '14 位长小数精确显示');
+{
+  const x = Core.parseNumberString('0.00000014789577');
+  ok(Core.parseNumberString(Core.fmtNumber(x)).equals(x), '长小数 fmt→parse 往返无损');
+  const y = Core.parseNumberString('1.00000000000001');
+  eq(Core.fmtNumber(y), '1.00000000000001', '15 位有效数字小数显示');
+  ok(Core.parseNumberString(Core.fmtNumber(y)).equals(y), '15 位小数往返无损');
+}
+// Frac 构造器对 NaN/Infinity/非整数必须立刻报错（曾在 gcd 里死循环挂起）
+{
+  let threw = 0;
+  try { new Frac(NaN); } catch (e) { threw++; }
+  try { new Frac(1, Infinity); } catch (e) { threw++; }
+  try { new Frac(2.5); } catch (e) { threw++; }
+  ok(threw === 3, 'Frac 拒绝 NaN/Infinity/非整数（不挂起）');
+}
 
 /* ---------- 三阶：两个对角数 → 只能确定中心与幻和 ---------- */
 section('三阶：已知 a=1, i=9（仅两数）');
@@ -180,6 +197,15 @@ section('值域限定：1…n²（classic）');
   eq(r.csp.exhaustive, true, '穷举完成');
   eq(r.csp.count, 2, 'a=2 时共 2 种合法填法（Lo Shu 的两种）');
   eq(r.complete, false, '仅 2 种填法时不能唯一确定');
+  // 示例必须来自穷举的合法填法：是 1…9 的排列、无分数、且保留已知数
+  ok(r.examples && r.examples.length === 2, 'classic 给出 2 组穷举示例');
+  ok((r.examples || []).every(e => e.cells.every(v => !v.includes('/'))), 'classic 示例无分数');
+  const numSort = (a, b) => Number(a) - Number(b);
+  ok((r.examples || []).every(e =>
+    e.cells.map(v => Core.parseNumberString(v).toString()).sort(numSort).join(',') ===
+    Array.from({ length: 9 }, (_, i) => String(i + 1)).sort(numSort).join(',')),
+    'classic 示例都是 1…9 的排列（每个数恰好用一次）');
+  ok((r.examples || []).every(e => e.cells[0] === '2'), 'classic 示例保留已知数 a=2');
 }
 {
   const r = solve(3, { 0: '2', 1: '7' }, { kind: 'classic' });
@@ -207,6 +233,7 @@ section('值域限定：只允许整数');
   ok(r.ok, '整数限定下可解');
   eq(r.integer.feasible, true, '找到整数填法见证');
   eq(r.finalCells[4].valueStr, '5', '中心 e=5 自动填入');
+  ok(r.examples && r.examples.length === 2, 'integer 未完整解给出 2 组整数示例');
   ok((r.examples || []).every(e => e.cells.every(v => !v.includes('/'))), '多解示例全部是整数');
   ok(r.sampling && r.sampling.illustrative && r.sampling.samples.every(s => s.every(v => !v.includes('/'))), '整数试解示例全部是整数');
 }
@@ -215,6 +242,12 @@ section('值域限定：只允许整数');
   const r = solve(3, { 0: '100', 1: '200' }, { kind: 'integer' });
   ok(r.ok && r.integer.feasible === true, '大数已知也能判定存在整数解');
   ok((r.examples || []).every(e => e.cells.every(v => !v.includes('/'))), '大数示例仍全为整数');
+  // 每组示例的行和必须等于其标注的 S（沿整数方向平移时 S 会变，不能统一写见证的 S）
+  (r.examples || []).forEach(ex => {
+    const cells = ex.cells.map(s => Core.parseNumberString(s));
+    const row = cells[0].add(cells[1]).add(cells[2]);
+    ok(row.equals(Core.parseNumberString(ex.S)), 'integer 示例标注 S=' + ex.S + ' 与其行和一致');
+  });
 }
 {
   const r = solve(3, { 0: '1' }, { kind: 'integer' });
@@ -256,6 +289,14 @@ section('矩阵冒烟：3–8 阶 × 4 种值域');
         ok(r.integer && r.integer.feasible === true, 'n=' + n + ' integer 有整数见证');
         const smp = (r.sampling && r.sampling.samples) || [];
         ok(smp.every(s => s.every(v => !v.includes('/'))), 'n=' + n + ' integer 示例全整数');
+      }
+      if ((kind === 'classic' || kind === 'set') && r.examples && r.examples.length) {
+        // 示例必须是限定数字（冒烟用 1..n²）的排列，绝不能出现有理方向的分数填法
+        const numSort2 = (a, b) => Number(a) - Number(b);
+        const want = Array.from({ length: n * n }, (_, i) => String(i + 1)).sort(numSort2).join(',');
+        ok(r.examples.every(e =>
+          e.cells.map(v => Core.parseNumberString(v).toString()).sort(numSort2).join(',') === want),
+          'n=' + n + ' ' + kind + ' 示例是限定数字的排列');
       }
     }
     // 超范围已知数（classic）：任意阶都必须拒绝（n≥5 曾漏校验）
