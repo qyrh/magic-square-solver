@@ -275,6 +275,7 @@
 
   $('selN').addEventListener('change', function () {
     buildInputs(Number(this.value));
+    syncDomainUI();   // 切阶数后刷新限定集合提示/预填（n² 随阶数变化）
     setQuickBar(null);
     scheduleAuto(0);
   });
@@ -423,7 +424,6 @@
     const toolbar = $('toolbar');
     if (!result) {
       bar.style.display = 'none';
-      if (state.view === 'full') return;
       toolbar.style.display = 'none';
       $('pages').style.display = 'none';
       state.view = 'none';
@@ -437,8 +437,10 @@
     if (result.complete) {
       html += '<b>已全部解出！</b>' + result.model.N + ' 个格子都已确定并自动填入（蓝色=你输入的，绿色=自动推出）。';
     } else {
+      const hiNoCsp = result.domain && result.domain.kind !== 'none' && result.domain.S && result.n >= 5;
       html += '当前能确定 <b>' + det + ' / ' + result.model.N + '</b> 个格子，已自动填入填写框；其余 ' +
-        result.undeterminedCells.length + ' 格在现有已知下无法唯一确定（剩 ' + result.dimFree + ' 个自由参数）。';
+        result.undeterminedCells.length + ' 格' + (hiNoCsp ? '未被线性推导确定（高阶不做限定范围内的穷举）' : '在现有已知下无法唯一确定') +
+        '（剩 ' + result.dimFree + ' 个自由参数）。';
     }
     html += result.S ? '　幻和 S = <b>' + result.S.valueStr + '</b>。' : '　幻和 S 尚未确定。';
     if (result.domain && result.domain.kind !== 'none') {
@@ -531,35 +533,47 @@
       return;
     }
     if (b.t === 'examples') {
-      // 示例填法：默认只有“示例”两字胶囊；点击展开列表；点击条目把该组数值写入填写区。
-      // 只 toggle 列表显隐，不改分页状态、不重渲染（打印 CSS 强制展开）。
+      // 示例填法：默认只有“示例”两字胶囊；展开后每组是一张方格图；点击方格把该组数值写入填写区。
+      // 只 toggle 显隐，不改分页状态、不重渲染（打印 CSS 强制展开）。
       const wrap = el('div', 'ex-fold');
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ghost ex-btn';
       btn.textContent = '示例';
-      btn.title = '点击展开 / 收起示例填法；点击某组示例可把该组数字写入填写区（可 Ctrl+Z 撤回）';
+      btn.title = '点击展开 / 收起示例填法（方格图）；点击某张方格可把该组数字写入填写区（可 Ctrl+Z 撤回）';
       const list = el('div', 'ex-list');
       list.style.display = 'none';
       b.items.forEach(function (it, q) {
-        const rows = [];
-        for (let r = 0; r < b.n; r++) rows.push(it.values.slice(r * b.n, (r + 1) * b.n).join(' '));
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.className = 'ex-item';
-        row.textContent = '示例 ' + (q + 1) + '：' + rows.join(' / ');
-        row.title = '点击把这组数字写入填写区（作为已知数，黑色；可 Ctrl+Z 撤回）';
-        row.addEventListener('click', function () {
+        const card = el('div', 'ex-card');
+        card.title = (it.note || '') + '。点击把这组数字写入填写区（作为已知数，黑色；可 Ctrl+Z 撤回）';
+        const tb = document.createElement('table');
+        tb.className = 'ms';
+        applySquareSize(tb, it.grid.cells);
+        for (let r = 0; r < b.n; r++) {
+          const tr = document.createElement('tr');
+          for (let c = 0; c < b.n; c++) {
+            const cell = it.grid.cells[r * b.n + c] || { text: '', kind: 'dot' };
+            const td = document.createElement('td');
+            td.className = 'k-' + (cell.kind || 'dot');
+            const fh = (cell.kind === 'given' || cell.kind === 'derived' || cell.kind === 'new') ? fracHtml(cell.text) : null;
+            if (fh) td.innerHTML = fh; else td.textContent = cell.text;
+            tr.appendChild(td);
+          }
+          tb.appendChild(tr);
+        }
+        card.appendChild(tb);
+        card.appendChild(el('div', 'ex-cap', '示例 ' + (q + 1)));
+        card.addEventListener('click', function () {
           if (it.values.length !== state.grid.values.length) return;   // 阶数已变时不写入
           pushHistory();
           setGrid(it.values.slice());
           $('inputErr').textContent = '';
         });
-        list.appendChild(row);
+        list.appendChild(card);
       });
       btn.addEventListener('click', function () {
         const collapsed = list.style.display === 'none';
-        list.style.display = collapsed ? 'block' : 'none';
+        list.style.display = collapsed ? 'flex' : 'none';
         btn.textContent = collapsed ? '收起' : '示例';
       });
       wrap.appendChild(btn);
@@ -673,21 +687,33 @@
     mask.addEventListener('click', function (e) { if (e.target === mask) mask.remove(); });
     box.appendChild(close);
 
+    // 特殊步（domain-S / csp）没有格子坐标与前提，需单独命名，避免 st.cell.r 崩溃
+    const whatName = st.special === 'csp'
+      ? '穷举确定的格子（' + (st.cspInfo && st.cspInfo.extras ? st.cspInfo.extras.map(function (e) { return e.label; }).join('、') : '') + '）'
+      : (st.isS ? '幻和 S' : '格子 ' + st.label + (st.cell ? '（第' + st.cell.r + '行第' + st.cell.c + '列）' : ''));
     const title = document.createElement('div');
     title.className = 'modal-title';
-    title.textContent = '这个数是根据哪几个数推出的？——' + (st.isS ? '幻和 S' : '格子 ' + st.label + '（第' + st.cell.r + '行第' + st.cell.c + '列）') + ' = ' + st.valueStr + '（第 ' + st.i + ' 步）';
+    title.textContent = '这个数是根据哪几个数推出的？——' + whatName + (st.valueStr ? ' = ' + st.valueStr : '') + '（第 ' + st.i + ' 步）';
     box.appendChild(title);
 
     const p = el('p', 'blk-p');
-    renderSegs(p, [
-      { text: '根据 ' },
-      ...st.premises.map(function (q, i) {
-        return { text: (i ? '、' : '') + q.label + ' = ' + q.valueStr + '（' + q.source + '）', cls: q.sourceIdx == null ? 'given' : 'derived', b: 1 };
-      }),
-      { text: '  ⇒  ' },
-      { text: (st.isS ? 'S' : st.label) + ' = ' + st.valueStr, cls: 'new', b: 1 },
-      { text: st.theorem ? '　依据：' + st.theorem.name : '　依据：线性恒等式（证明见下）', cls: 'dim' }
-    ]);
+    if (st.premises && st.premises.length) {
+      renderSegs(p, [
+        { text: '根据 ' },
+        ...st.premises.map(function (q, i) {
+          return { text: (i ? '、' : '') + q.label + ' = ' + q.valueStr + '（' + q.source + '）', cls: q.sourceIdx == null ? 'given' : 'derived', b: 1 };
+        }),
+        { text: '  ⇒  ' },
+        { text: (st.isS ? 'S' : st.label) + ' = ' + st.valueStr, cls: 'new', b: 1 },
+        { text: st.theorem ? '　依据：' + st.theorem.name : '　依据：线性恒等式（证明见下）', cls: 'dim' }
+      ]);
+    } else if (st.special === 'csp') {
+      renderSegs(p, [
+        { text: '依据：穷举验证 —— 在「限定数字各用一次」的全部 ' + ((st.cspInfo && st.cspInfo.count) || '?') + ' 种合法填法里，这些格子每次都取同一个值，因此是确定的。', cls: 'dim' }
+      ]);
+    } else {
+      renderSegs(p, [{ text: '依据：' + (st.domainNote || '值域限定') + '（题设）。', cls: 'dim' }]);
+    }
     box.appendChild(p);
 
     const blocks = MagicRender.stepBlocks(state.result, st);
