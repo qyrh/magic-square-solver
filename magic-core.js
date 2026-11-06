@@ -548,10 +548,13 @@
       for (const cd of cands) {
         const id = cd.id;
         let lamSum = 0;
+        let maxAbs = 0;
         const lamVals = Array.from(id.lambdaMap.values());
         for (let q = 0; q < lamVals.length; q++) {
           const v = lamVals[q];
-          if (v < 0) { lamSum = lamSum - v; } else { lamSum = lamSum + v; }
+          const a = v < 0 ? -v : v;
+          lamSum += a;
+          if (a > maxAbs) maxAbs = a;
         }
         const tech = techniqueClass(id.lambdaMap);   // 1幻和直用 2两线去交叉 3多线去交叉 4一般
         // 涉及到的格子数（目标格、前提格、以及各条线覆盖的格子）
@@ -565,12 +568,13 @@
         const rank = cd.thm ? (THEOREM_RANK[cd.thm.key] !== undefined ? THEOREM_RANK[cd.thm.key] : 9) : 9;
         const score = [
           tech,                        // ① 技巧从简：幻和直用最优先
-          lamSum,                      // ② 涉及的行列数（带系数按次数计入）
-          inv.size,                    // ③ 涉及的格子数（越少越好）
-          cd.d,                        // ④ 前提数（越少越好）
-          rank,                        // ⑤ 已命名定理优先（对顶/马步/中心…）
-          id.gamma === 1 ? 0 : 1,      // ⑥ 能整除优先（少一次除法）
-          cd.target === SC ? 1 : 0,    // ⑦ 同分时先出格子
+          maxAbs,                      // ② 系数尽量为 1（能用“重合抵消”讲清楚）
+          lamSum,                      // ③ 涉及的行列数（带系数按次数计入）
+          inv.size,                    // ④ 涉及的格子数（越少越好）
+          cd.d,                        // ⑤ 前提数（越少越好）
+          rank,                        // ⑥ 已命名定理优先（对顶/马步/中心…）
+          id.gamma === 1 ? 0 : 1,      // ⑦ 少一次除法
+          cd.target === SC ? 1 : 0,    // ⑧ 同分时先出格子
           cd.target
         ];
         cd.tech = tech; cd.score = score;
