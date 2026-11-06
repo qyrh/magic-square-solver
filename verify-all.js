@@ -153,6 +153,11 @@ function verifyPositive(n, mode, trueSq, givenMap, domain, caseName) {
     (r.examples || []).forEach(e => strs.push.apply(strs, e.cells));
     if (r.sampling && r.sampling.samples) r.sampling.samples.forEach(s => strs.push.apply(strs, s));
     if (strs.some(v => String(v).includes('/'))) fails.push('integer 示例出现分数');
+    // 有已知数且未完整解时，integer 必须给出 2 组全整数示例 + 试解采样（防“静默不生成”回归）
+    if (givenMap.size > 0 && !r.complete) {
+      if (!(r.examples && r.examples.length === 2)) fails.push('integer 未完整解时应给 2 组整数示例');
+      if (!(r.sampling && r.sampling.samples && r.sampling.samples.length > 0)) fails.push('integer 应有试解采样');
+    }
   }
   if (mode === 'classic' || mode === 'set') {
     // domain.S = 总和/n
@@ -168,6 +173,54 @@ function verifyPositive(n, mode, trueSq, givenMap, domain, caseName) {
       for (const c of r.csp.stableCells) if (!r.finalCells[c]) fails.push('csp 稳定格 ' + c + ' 未在 finalCells');
       if (r.csp.count === 1 && r.complete !== true) fails.push('csp 唯一解但 complete=false');
     }
+  }
+
+  // 6b 示例填法必须与值域一致且是真正的幻方（全模式）：
+  //    所有线和相等、保留全部已知数；classic/set 还必须是限定数字的排列（每个数恰好用一次）
+  {
+    const shownGrids = [];
+    (r.examples || []).forEach(e => shownGrids.push({ src: 'examples', cells: e.cells }));
+    if (r.sampling && r.sampling.samples) r.sampling.samples.forEach(s => shownGrids.push({ src: 'sampling', cells: s }));
+    if (r.csp && r.csp.samples) r.csp.samples.forEach(s => shownGrids.push({ src: 'csp', cells: s }));
+    const msSorted = (mode === 'classic' || mode === 'set')
+      ? (mode === 'classic' ? Array.from({ length: N }, (_, i) => new Frac(i + 1)) : domain.values)
+        .map(v => v.toString()).sort().join(',') : null;
+    for (const g of shownGrids) {
+      if (!Array.isArray(g.cells) || g.cells.length !== N) { fails.push(g.src + ' 示例不是 ' + N + ' 格'); continue; }
+      let fr = null;
+      try { fr = g.cells.map(s => Core.parseNumberString(s)); }
+      catch (e) { fails.push(g.src + ' 示例含不可解析值: ' + e.message); continue; }
+      // 所有 2n+2 条线和相等
+      let S0 = new Frac(0);
+      for (let c = 0; c < n; c++) S0 = S0.add(fr[c]);
+      const bad = [];
+      for (let rr = 0; rr < n; rr++) {
+        let s2 = new Frac(0);
+        for (let c = 0; c < n; c++) s2 = s2.add(fr[rr * n + c]);
+        if (!s2.equals(S0)) bad.push('行' + rr);
+      }
+      for (let c = 0; c < n; c++) {
+        let s2 = new Frac(0);
+        for (let rr = 0; rr < n; rr++) s2 = s2.add(fr[rr * n + c]);
+        if (!s2.equals(S0)) bad.push('列' + c);
+      }
+      { let s2 = new Frac(0); for (let i = 0; i < n; i++) s2 = s2.add(fr[i * n + i]); if (!s2.equals(S0)) bad.push('主对角线'); }
+      { let s2 = new Frac(0); for (let i = 0; i < n; i++) s2 = s2.add(fr[i * n + (n - 1 - i)]); if (!s2.equals(S0)) bad.push('副对角线'); }
+      if (bad.length) fails.push(g.src + ' 示例不是幻方（' + bad.join('、') + ' 和不等）');
+      // 保留已知数
+      for (const e of givenMap) {
+        if (!fr[e[0]].equals(e[1])) { fails.push(g.src + ' 示例未保留已知数（格 ' + e[0] + '）'); break; }
+      }
+      // classic/set：必须是限定数字的排列
+      if (msSorted) {
+        const got = g.cells.map(s => Core.parseNumberString(s).toString()).sort().join(',');
+        if (got !== msSorted) fails.push(g.src + ' 示例不是限定数字的排列（含范围外数字或重复）');
+      }
+    }
+    // 限定模式未完整解、且穷举得到 ≥2 种填法时，必须给出穷举示例
+    if ((mode === 'classic' || mode === 'set') && n <= 4 && !r.complete &&
+      r.csp && r.csp.ok && r.csp.samples && r.csp.samples.length > 1 &&
+      !(r.examples && r.examples.length >= 2)) fails.push('限定模式应给出穷举示例（examples 缺失）');
   }
 
   record(n, mode, caseName, ms, fails.length === 0, fails);
