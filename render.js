@@ -420,7 +420,7 @@
       bl.push(P(B('在给定条件下，只能确定部分格子。'), S('无法唯一确定的格子：' + (undLetters.join('、') || '无') + '；解空间还剩 ' + result.dimFree + ' 个自由参数。')));
       bl.push(stateGrid(model, snapAll, -1, [S('蓝色 = 题设，绿色 = 已推出，灰色字母 = 无法唯一确定。')]));
       if (result.examples) {
-        bl.push(P(S('下面两种填法都满足全部已知条件，但未确定的格子取值不同——这正说明这些格子无法由已知数推出：')));
+        bl.push(P(S('下面两种填法都满足全部已知条件' + (result.domain && result.domain.kind === 'integer' ? '（且每个数都是整数）' : '') + '，但未确定的格子取值不同——这正说明这些格子无法由已知数推出：')));
         for (let i = 0; i < result.examples.length; i++) {
           const ex = result.examples[i];
           const cells = ex.cells.map(function (t, idx) {
@@ -488,10 +488,24 @@
     // 随机试解验证
     const sp = result.sampling;
     if (sp) {
-      bl.push(H3('随机试解验证（换个角度看“能否确定”）'));
-      if (sp.unique) {
+      if (sp.illustrative) {
+        // 整数限定：给出若干组全整数填法作为示例（不作“确定”的完备性证明）
+        bl.push(H3('整数填法示例（对应「只允许整数」）'));
+        const varying = new Set(sp.varyingCells || []);
+        bl.push(P(S('下面给出 ' + sp.count + ' 组'), B('全部为整数'), S('的填法（都满足已知条件）。红色格子在示例中取值不同，说明现有已知数确实定不住它们；')));
+        bl.push(P(S('绿色只是在本例这几组里相同，' + '不作为“确定”的证明——某个数是否确定，以上面逐步推导的结论为准。', { cls: 'dim' })));
+        for (let q = 0; q < sp.samples.length; q++) {
+          const cells = sp.samples[q].map(function (t, idx) {
+            const isGiv = result.givens.some(function (g) { return g.coord === idx; });
+            return { text: t, kind: isGiv ? 'given' : (varying.has(idx) ? 'diff' : 'derived') };
+          });
+          bl.push(GRID(n, cells, [S('整数填法示例 ' + (q + 1) + ' / ' + sp.count)]));
+        }
+      } else if (sp.unique) {
+        bl.push(H3('随机试解验证（换个角度看“能否确定”）'));
         bl.push(P(S('在全部已知条件下随机试解：无论怎么取，只能得到同一组数——说明每个格子都被唯一确定（这也与上面逐格推出的结果一致）。')));
       } else {
+        bl.push(H3('随机试解验证（换个角度看“能否确定”）'));
         const stable = new Set(sp.stableCells);
         bl.push(P(S('在满足全部已知条件的解空间里随机取了 '), B(sp.count + ' 组'), S(' 解（下面展示其中 3 组；红色 = 各次取值不同的格子，绿色 = 每次都相同的格子）：')));
         bl.push(P(S('每次都取相同值的格子，恰好就是上面推出的那些格子（与线性判定' + (sp.agreeWithLinear ? '完全一致 ✓' : '不一致 ✗（不应发生）') + '）。这正说明：往这些格子里填别的数字就无解——它们是确定解，所以程序自动填上了；红色格子还能变，说明现有已知数定不住它们。')));
