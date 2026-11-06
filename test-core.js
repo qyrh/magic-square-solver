@@ -206,6 +206,20 @@ section('值域限定：只允许整数');
   const r = solve(3, { 0: '1', 8: '9' }, { kind: 'integer' });
   ok(r.ok, '整数限定下可解');
   eq(r.integer.feasible, true, '找到整数填法见证');
+  eq(r.finalCells[4].valueStr, '5', '中心 e=5 自动填入');
+  ok((r.examples || []).every(e => e.cells.every(v => !v.includes('/'))), '多解示例全部是整数');
+  ok(r.sampling && r.sampling.illustrative && r.sampling.samples.every(s => s.every(v => !v.includes('/'))), '整数试解示例全部是整数');
+}
+{
+  // 较大的已知数：按分母周期精确枚举，仍应找到整数解
+  const r = solve(3, { 0: '100', 1: '200' }, { kind: 'integer' });
+  ok(r.ok && r.integer.feasible === true, '大数已知也能判定存在整数解');
+  ok((r.examples || []).every(e => e.cells.every(v => !v.includes('/'))), '大数示例仍全为整数');
+}
+{
+  const r = solve(3, { 0: '1' }, { kind: 'integer' });
+  const allInt = (r.sampling && r.sampling.samples || []).every(s => s.every(v => !v.includes('/')));
+  ok(r.ok && allInt, '仅 1 个已知数时试解也全为整数');
 }
 
 section('值域限定：自定义集合');
