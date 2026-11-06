@@ -530,6 +530,43 @@
       pageDiv.appendChild(det);
       return;
     }
+    if (b.t === 'examples') {
+      // 示例填法：默认只有“示例”两字胶囊；点击展开列表；点击条目把该组数值写入填写区。
+      // 只 toggle 列表显隐，不改分页状态、不重渲染（打印 CSS 强制展开）。
+      const wrap = el('div', 'ex-fold');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ghost ex-btn';
+      btn.textContent = '示例';
+      btn.title = '点击展开 / 收起示例填法；点击某组示例可把该组数字写入填写区（可 Ctrl+Z 撤回）';
+      const list = el('div', 'ex-list');
+      list.style.display = 'none';
+      b.items.forEach(function (it, q) {
+        const rows = [];
+        for (let r = 0; r < b.n; r++) rows.push(it.values.slice(r * b.n, (r + 1) * b.n).join(' '));
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'ex-item';
+        row.textContent = '示例 ' + (q + 1) + '：' + rows.join(' / ');
+        row.title = '点击把这组数字写入填写区（作为已知数，黑色；可 Ctrl+Z 撤回）';
+        row.addEventListener('click', function () {
+          if (it.values.length !== state.grid.values.length) return;   // 阶数已变时不写入
+          pushHistory();
+          setGrid(it.values.slice());
+          $('inputErr').textContent = '';
+        });
+        list.appendChild(row);
+      });
+      btn.addEventListener('click', function () {
+        const collapsed = list.style.display === 'none';
+        list.style.display = collapsed ? 'block' : 'none';
+        btn.textContent = collapsed ? '收起' : '示例';
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(list);
+      pageDiv.appendChild(wrap);
+      return;
+    }
     if (b.t === 'grid' || b.t === 'table') {
       const tb = document.createElement('table');
       tb.className = b.t === 'grid' ? 'ms' : 'data';
@@ -675,6 +712,73 @@
     if (e.key === 'ArrowRight' || e.key === 'PageDown') $('btnNext').click();
     if (e.key === 'ArrowLeft' || e.key === 'PageUp') $('btnPrev').click();
   });
+
+  /* ---------------- 帮助弹窗（原首页前置说明精简后移到这里；不进 pages，不参与打印/导出） ---------------- */
+  function openHelpModal() {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask no-print';
+    const box = document.createElement('div');
+    box.className = 'modal help-modal';
+    const close = document.createElement('button');
+    close.className = 'ghost modal-close';
+    close.textContent = '✕';
+    close.addEventListener('click', function () { mask.remove(); });
+    mask.addEventListener('click', function (e) { if (e.target === mask) mask.remove(); });
+    box.appendChild(close);
+
+    const title = document.createElement('div');
+    title.className = 'modal-title';
+    title.textContent = '使用说明与字母记号';
+    box.appendChild(title);
+
+    const h4 = function (t) { const e = document.createElement('h4'); e.textContent = t; box.appendChild(e); };
+    const ul = function (arr) {
+      const u = document.createElement('ul');
+      arr.forEach(function (t) { const li = document.createElement('li'); li.textContent = t; u.appendChild(li); });
+      box.appendChild(u);
+    };
+    const para = function (t) { const e = el('p', 'blk-p'); e.textContent = t; box.appendChild(e); };
+
+    h4('怎么用');
+    ul([
+      '3–8 阶；格子留空 = 未知，可填整数、分数、小数（如 12、1/2、0.75、-3/4）。',
+      '输入即自动出数：能确定的格子全部自动回填（绿色斜体 = 自动推出，双击可看它的证明）；直接输入即变为已知数（黑色）。',
+      '点“求 解”给出逐步最简证明：每步 = 结论 → 证明（默认折叠，可一键展开）→ 运用 → 示意图；点击图里的绿色/黄色格子可查看该数的依据。',
+      '总结页的“示例”可展开查看多组满足已知条件的填法；点击某组即把它写入填写区（可 Ctrl+Z 撤回）。',
+      '↩ 撤回 / ↪ 重做（Ctrl+Z / Ctrl+Y）；支持分页、一页全显、打印为 PDF、导出 DOCX。'
+    ]);
+
+    h4('字母记号（当前 ' + state.n + ' 阶）');
+    para('按行的顺序给每个格子一个字母（下图），后文用字母指代格子；S 表示幻和（每条线上 n 个数之和）。每步证明里的“字母幻方图”只标注该步涉及的格子。');
+    const tb = document.createElement('table');
+    tb.className = 'help-letters';
+    const letters = lettersFor(state.n);
+    for (let r = 0; r < state.n; r++) {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < state.n; c++) {
+        const td = document.createElement('td');
+        td.textContent = letters[r * state.n + c];
+        tr.appendChild(td);
+      }
+      tb.appendChild(tr);
+    }
+    box.appendChild(tb);
+
+    h4('思路');
+    para('一个格子若在“满足全部已知条件的所有填法”中都取同一个值，它就是可确定的。程序按“需要已知数最少优先”逐步出数：每一步先证明一条对任意幻方都成立的恒等式（用红组/蓝组、重合抵消的讲法），再代入本题数字。技巧从简：幻和直用 → 两线去交叉 → 多线去交叉。');
+
+    h4('值域限定');
+    ul([
+      '不限定：任意有理数。',
+      '只允许整数：可确定的数若只能取分数则报无解；并构造一组全整数填法作为存在性见证。',
+      '1…n²（各用一次）：先用“n 条行线之和 = nS = 全部数字之和”直接求出幻和，证明显著变短。',
+      '自定义数字集合（n² 个，各用一次）：同样直接得幻和；3–4 阶还会穷举范围内所有合法填法，用“该格在所有填法中都相同”证明其确定。'
+    ]);
+
+    mask.appendChild(box);
+    document.body.appendChild(mask);
+  }
+  document.querySelectorAll('.btn-help').forEach(function (b) { b.addEventListener('click', openHelpModal); });
 
   /* ---------------- 导出 ---------------- */
   $('btnPrint').addEventListener('click', function () { window.print(); });
