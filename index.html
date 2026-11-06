@@ -130,12 +130,14 @@
   #quickBar { background: #fff; border: 1px solid #bfe3c8; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14.5px; }
   #quickBar .dim { color: var(--dim); font-size: 13px; }
 
-  /* ---------- 示例折叠（总结页）：默认只有“示例”两字胶囊 ---------- */
+  /* ---------- 示例折叠（总结页）：默认只有“示例”两字胶囊，展开后是方格图卡片 ---------- */
   .ex-fold { margin: 10px 0 6px; }
   .ex-btn { font-weight: 700; letter-spacing: 2px; padding: 5px 16px; border-radius: 999px; }
-  .ex-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-  .ex-item { text-align: left; background: #f6f8fb; border: 1px solid var(--line); color: #26303d; border-radius: 8px; padding: 6px 12px; font-size: 13.5px; font-family: Consolas, "Microsoft YaHei", monospace; white-space: normal; word-break: break-all; line-height: 1.5; }
-  .ex-item:hover { background: #e8eef8; border-color: #2b5fd9; }
+  .ex-list { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  .ex-card { cursor: pointer; border: 1px solid var(--line); border-radius: 10px; padding: 10px 10px 6px; background: #fcfdfe; transition: border-color .12s, box-shadow .12s; }
+  .ex-card:hover { border-color: #2b5fd9; box-shadow: 0 4px 14px rgba(43, 95, 217, .16); }
+  .ex-card table.ms { margin: 0; }
+  .ex-cap { text-align: center; font-size: 12.5px; color: var(--dim); margin-top: 5px; }
 
   /* ---------- “?”帮助按钮与帮助弹窗 ---------- */
   .btn-help { width: 34px; padding: 6px 0; font-weight: 700; border-radius: 50%; }
@@ -157,8 +159,9 @@
     table.ms, table.data { page-break-inside: avoid; }
     details.proof-details > summary { display: none; }
     details.proof-details { border: none; padding: 0; }
-    .ex-list { display: block !important; }   /* 打印时示例完整展开 */
-    .ex-item { border: none; background: none; padding: 2px 0; }
+    .ex-list { display: flex !important; }   /* 打印时示例完整展开 */
+    .ex-btn { display: none; }               /* 打印时隐藏“示例/收起”胶囊按钮 */
+    .ex-card { border: none; box-shadow: none; background: none; }
   }
 </style>
 </head>
@@ -242,9 +245,9 @@
   </section>
 </div>
 
-<script src="magic-core.js?v=23"></script>
-<script src="render.js?v=23"></script>
-<script src="docx.js?v=23"></script>
-<script src="app.js?v=23"></script>
+<script src="magic-core.js?v=24"></script>
+<script src="render.js?v=24"></script>
+<script src="docx.js?v=24"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>
