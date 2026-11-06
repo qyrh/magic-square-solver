@@ -136,12 +136,24 @@ build.js ── 单文件打包（脚本白名单校验后内联）
 
 **新增判例**：CSP 撤销必须 `trail.pop()`（曾因只读末元素导致崩溃）；`n≥5` 跳过穷举以免超时。
 
+## 十一、第 7 轮新增（示例折叠 / 删首页说明 / 全矩阵验证）
+
+| 需求 | 实现 | 验证 |
+| --- | --- | --- |
+| 总结页示例区占空间太大、解释太多 → 两字折叠 | `render.js: examplesBlock()` 新块 `{t:'examples', items}`；`app.js: renderBlock` 胶囊“示例/收起”+ 纯数值条目 + 点击条目 `setGrid` 写入（黑色已知数，Ctrl+Z 可撤回）；打印 CSS 强制展开 | E2E：默认折叠→展开 5 条→写入 9 格全黑→Ctrl+Z 回退→收起；分页位置不变 |
+| 删掉证明前的首页说明页 | `buildDocument()` 直接从“第 1 步”开始（页数 = 步数 + 1）；原说明（怎么用/字母表/思路/值域）精简进“?”帮助弹窗（两处按钮，Esc/✕/点遮罩关闭，no-print，不进 DOCX） | test-docx：pages[0] 含“第 1 步”、无“记号/思路”标题；E2E：弹窗内容与关闭、打印无残留 |
+| DOCX 中示例仍要完整 | `docx.js: renderBlocks('examples')` 逐条 `gridXml`（含说明性 caption） | verify-all：每阶 DOCX 经 Python zipfile + 良构校验 6/6 |
+| 全阶×全模式穷尽验证 | 新增 `verify-all.js`：3–8 阶 × none/integer/classic/set，0/1/2/3/n 已知（取自真实幻方）+ 矛盾 + 超范围 + integer 分数无解，共 177 例；断言步号对齐、数值一致、填格缺口 0、域语义、性能 ≤2s、文字合规 | **177/177 全过**；最慢单例 1158ms（4 阶 CSP） |
+| 修复：限定模式超范围漏校验（n≥5） | `buildDomain()` 对 multiset 校验已知数（成员+份数），任意阶生效 | verify-all 超范围负例 12/12 由 FAIL 转 PASS；test-core 冒烟断言 |
+
+
 ## 九、如何复跑验证
 
 ```
 cd magic-square-solver
-node test-core.js     # 67 项断言
+node test-core.js     # 198 项断言（含 3–8 阶 × 4 值域矩阵冒烟）
 node test-docx.js     # DOCX 结构（生成 sample-output.docx / sample-frac.docx）
+node verify-all.js    # 全阶×全模式穷尽矩阵 177 例 + 每阶 DOCX 的 Python 校验
 node build.js         # 生成 dist/幻方求解器.html 并自检无外链脚本
 # 浏览器：双击 dist/幻方求解器.html（或 index.html），试预设“三阶·两数定一格”等
 ```
