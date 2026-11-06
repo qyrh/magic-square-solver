@@ -140,11 +140,24 @@ build.js ── 单文件打包（脚本白名单校验后内联）
 
 | 需求 | 实现 | 验证 |
 | --- | --- | --- |
-| 总结页示例区占空间太大、解释太多 → 两字折叠 | `render.js: examplesBlock()` 新块 `{t:'examples', items}`；`app.js: renderBlock` 胶囊“示例/收起”+ 纯数值条目 + 点击条目 `setGrid` 写入（黑色已知数，Ctrl+Z 可撤回）；打印 CSS 强制展开 | E2E：默认折叠→展开 5 条→写入 9 格全黑→Ctrl+Z 回退→收起；分页位置不变 |
+| 总结页示例区占空间太大、解释太多 → 两字折叠 | `render.js: examplesBlock()` 新块 `{t:'examples', items}`；`app.js: renderBlock` 胶囊“示例/收起”+ 方格图卡片 + 点击卡片 `setGrid` 写入（黑色已知数，Ctrl+Z 可撤回）；打印 CSS 强制展开 | E2E：默认折叠→展开→写入 9 格全黑→Ctrl+Z 回退→收起；分页位置不变 |
 | 删掉证明前的首页说明页 | `buildDocument()` 直接从“第 1 步”开始（页数 = 步数 + 1）；原说明（怎么用/字母表/思路/值域）精简进“?”帮助弹窗（两处按钮，Esc/✕/点遮罩关闭，no-print，不进 DOCX） | test-docx：pages[0] 含“第 1 步”、无“记号/思路”标题；E2E：弹窗内容与关闭、打印无残留 |
 | DOCX 中示例仍要完整 | `docx.js: renderBlocks('examples')` 逐条 `gridXml`（含说明性 caption） | verify-all：每阶 DOCX 经 Python zipfile + 良构校验 6/6 |
-| 全阶×全模式穷尽验证 | 新增 `verify-all.js`：3–8 阶 × none/integer/classic/set，0/1/2/3/n 已知（取自真实幻方）+ 矛盾 + 超范围 + integer 分数无解，共 177 例；断言步号对齐、数值一致、填格缺口 0、域语义、性能 ≤2s、文字合规 | **177/177 全过**；最慢单例 1158ms（4 阶 CSP） |
+| 全阶×全模式穷尽验证 | 新增 `verify-all.js`：3–8 阶 × none/integer/classic/set，0/1/2/3/n 已知（取自真实幻方）+ 矛盾 + 超范围 + integer 分数无解，共 177 例；断言步号对齐、数值一致、填格缺口 0、域语义、性能 ≤2s、文字合规 | **177/177 全过**；最慢单例 ~1s（4 阶 CSP） |
 | 修复：限定模式超范围漏校验（n≥5） | `buildDomain()` 对 multiset 校验已知数（成员+份数），任意阶生效 | verify-all 超范围负例 12/12 由 FAIL 转 PASS；test-core 冒烟断言 |
+
+## 十二、第 8 轮新增（示例遵守值域 + 方格图展示 + 子代理逐行审查）
+
+| 需求/问题 | 实现 | 验证 |
+| --- | --- | --- |
+| classic/set 示例出现分数、违反“每个数恰好用一次” | distinct 模式示例只取 `csp.samples`（穷举合法填法）；有理方向示例/采样对 distinct 关闭；n≥5 未穷举不给示例 | verify-all 6b：全部示例必须是真幻方 + 保留已知 + **multiset 精确排列**；E2E + 视觉模型核验 1..9 / 1..16 |
+| 示例展示要用方格不是线性 | 展开为正方形网格卡片（红=各示例间不同、灰=恰好相同未证明、given 蓝），点击写入填写区 | E2E：3 张 3×3 卡片各含 1..9 一次；视觉模型 5 项检查全过 |
+| set 模式第 1 步打印假等式 `1+2+…+n²=总和` | `domainSBlocks` 按 `domainKind` 分支：set 写“全部限定数字相加” | Node 抽查断言 |
+| 点击穷举定格弹窗 TypeError（csp 步 cell=null） | `openStepModal` 特判 special 步 | E2E：弹窗正常打开，标题“穷举确定的格子（g、k）” |
+| 长小数显示坏串（浮点失真 `'0.01.4…e+21'`）致崩溃 | `exactDecimal` 改纯整数运算，超 2^53 退回分数 | test-core 回归：14/15 位小数显示与往返无损 |
+| integer 示例 S 标注与网格线和不一致 | 逐例计算 `S = w[N] + k·pickDir[N]` | test-core：a=100,b=200 行和 = 标注 S |
+| integer 随机分支谎称“穷尽无解” | `exact` 标志；随机未找到 → `feasible:null` + 诚实文案，不再 ok:false | 代码路径审查（构造触发困难，防御性修复） |
+| 其余 8 项（切阶数不刷值域 UI、NaN 死循环、表格 null 行、标色失实、打印胶囊等） | 见 HANDOFF §8.8 | 4 个审查子代理（magic-core / render+docx / app+index / tests）共 15 项，全部修复 |
 
 
 ## 九、如何复跑验证
