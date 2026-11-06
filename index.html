@@ -156,6 +156,14 @@
         </select>
       </label>
       <label class="chk" title="每填入/修改一个数字后自动重新出数"><input type="checkbox" id="autoSolve" checked> 输入即自动出数</label>
+      <label>值域：
+        <select id="selDomain" title="限定每个格子允许使用的数字范围；求解与证明策略会随之改变">
+          <option value="none">不限定（任意有理数）</option>
+          <option value="integer">只允许整数（从候选最少的格子试填）</option>
+          <option value="classic">1…n²（各用一次，可直接得幻和）</option>
+          <option value="set">自定义数字集合（n² 个，各用一次）</option>
+        </select>
+      </label>
       <button class="ghost" id="btnUndo" title="Ctrl+Z">↩ 撤回</button>
       <button class="ghost" id="btnRedo" title="Ctrl+Y">↪ 重做</button>
       <button class="ghost" id="btnBatchToggle">批量填入…</button>
@@ -164,11 +172,19 @@
       <button class="big" id="btnSolve">求 解</button>
     </div>
     <div id="gridBox"></div>
+    <div id="setBox" style="display:none; margin-top:8px;">
+      <label style="font-size:14px;">限定数字（恰好 n² 个，用空格/逗号分隔，每个用一次）：
+        <input type="text" id="customSet" placeholder="例如：1 2 3 4 5 6 7 8 9">
+      </label>
+      <button class="ghost" id="btnSetApply" style="margin-left:6px;">应用</button>
+      <div class="hint" id="setHint">提示：填满 9 个数即可（可用分数/负数，如 -3 0.5 2/3 …）。</div>
+    </div>
     <div id="batchBox" style="display:none; margin-top:8px;">
       <textarea id="batchText" rows="4" placeholder="按行粘贴数字，空格/逗号分隔，空缺用 - 或 . 表示，例如：&#10;2 7 -&#10;- 5 -&#10;- - 9"></textarea>
       <div style="margin-top:4px;"><button class="ghost" id="btnBatchApply">应用到表格</button></div>
     </div>
     <div class="hint" style="margin-top:6px;">每个格子可填：整数（如 <code>12</code>）、分数（如 <code>1/2</code>、<code>10/4</code>）、小数（如 <code>0.75</code>）、甚至 <code>1.5/2</code>；留空 = 未知。<b>能确定的数会自动回填到填写框</b>（绿色斜体 = 自动推出，直接输入可把它改成已知数，双击可查看证明）；黑色 = 你输入的已知数。<b>↩ 撤回 / ↪ 重做</b>（Ctrl+Z / Ctrl+Y）可回退任何填写操作。输出自动选有效数字更少的表示（平手取最简分数），图中分数以上下分式呈现。</div>
+    <div class="hint" style="margin-top:4px;"><b>值域限定</b>：选「1…n²」或「自定义集合」时，程序先用“n 条行线之和 = nS = 全部数字之和”直接算出幻和，再据幻和逐步推出；并在限定范围内<b>穷举所有合法填法</b>，用“该格在所有填法中都等于同一个值”来证明某格确定（也用于发现无解，如 1…9 时角格不可能是 1）。选「只允许整数」时，程序检查可确定的数是否都是整数，并尝试构造整数填法作为见证；若只能取分数则报告无解（如三阶 a=1, i=2 会使中心 = 3/2）。</div>
     <div class="hint" style="margin-top:4px;">示例：</div>
     <div class="controls" style="margin-top:2px;">
       <button class="ghost" data-preset="two">三阶·两数定一格</button>
@@ -201,9 +217,9 @@
   </section>
 </div>
 
-<script src="magic-core.js?v=19"></script>
-<script src="render.js?v=19"></script>
-<script src="docx.js?v=19"></script>
-<script src="app.js?v=19"></script>
+<script src="magic-core.js?v=20"></script>
+<script src="render.js?v=20"></script>
+<script src="docx.js?v=20"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>
