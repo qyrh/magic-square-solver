@@ -49,6 +49,59 @@
     if (!arr || arr.length === 0) return '0';
     return arr.map(function (e) { return regionCellStr(model, e); }).join(' + ');
   }
+
+  /* 三阶马步定理的最优讲法：
+   * 红组 = 过角格的三条线（一行、一列、一条过该角的对角线）→ 和 = 3S
+   * 蓝组 = 全部三条行线（覆盖整个九宫格）→ 和 = 3S
+   * 抵消两组都有的格子后：红剩 角格×2，蓝剩 与角格成马步的两格 → 2a = f + h
+   */
+  function knightGroups(model, step) {
+    const n = model.n;
+    if (n !== 3) return null;
+    const cellsAll = [step.target].concat(step.premises.filter(function (p) { return !p.isS; }).map(function (p) { return p.coord; }));
+    const isCorner = function (c) {
+      const r = Math.floor(c / n), col = c % n;
+      return (r === 0 || r === n - 1) && (col === 0 || col === n - 1);
+    };
+    const corner = cellsAll.filter(isCorner)[0];
+    if (corner === undefined) return null;
+    const r0 = Math.floor(corner / n), c0 = corner % n;
+    const rowLine = r0;                       // 行线索引
+    const colLine = n + c0;                   // 列线索引
+    const diagLine = (r0 === c0) ? 2 * n : 2 * n + 1;   // 过该角的对角线
+    const redLines = [rowLine, colLine, diagLine];
+    const blueLines = [0, 1, 2];              // 三阶：全部行线
+
+    const redMap = new Map(), blueMap = new Map();
+    for (const li of redLines) for (const c of model.lines[li].cells) redMap.set(c, (redMap.get(c) || 0) + 1);
+    for (const li of blueLines) for (const c of model.lines[li].cells) blueMap.set(c, (blueMap.get(c) || 0) + 1);
+    const all = new Set(Array.from(redMap.keys()).concat(Array.from(blueMap.keys())));
+    const cancelled = [], redOnly = [], blueOnly = [];
+    for (const c of all) {
+      const r = redMap.get(c) || 0, b = blueMap.get(c) || 0;
+      const m = Math.min(r, b);
+      if (m > 0) cancelled.push({ cell: c, count: m });
+      if (r - m > 0) redOnly.push({ cell: c, count: r - m });
+      if (b - m > 0) blueOnly.push({ cell: c, count: b - m });
+    }
+    redOnly.sort(function (a, b) { return a.cell - b.cell; });
+    blueOnly.sort(function (a, b) { return a.cell - b.cell; });
+    const cells = [];
+    const redSet = new Map(redOnly.map(function (e) { return [e.cell, e.count]; }));
+    const blueSet = new Map(blueOnly.map(function (e) { return [e.cell, e.count]; }));
+    for (let i = 0; i < model.N; i++) {
+      if (redSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: redSet.get(i) }), kind: 'red' });
+      else if (blueSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: blueSet.get(i) }), kind: 'blue' });
+      else cells.push({ text: '·', kind: 'dot' });
+    }
+    const redStr = redOnly.length ? redOnly.map(function (e) { return (e.count > 1 ? e.count + '·' : '') + model.letters[e.cell]; }).join(' + ') : '0';
+    const blueStr = blueOnly.length ? blueOnly.map(function (e) { return (e.count > 1 ? e.count + '·' : '') + model.letters[e.cell]; }).join(' + ') : '0';
+    return {
+      redLines: redLines, blueLines: blueLines, kRed: redLines.length, kBlue: blueLines.length,
+      cells: cells, redStr: redStr, blueStr: blueStr,
+      cancelledNames: cancelled.map(function (e) { return model.letters[e.cell]; }).join('、')
+    };
+  }
   function coeffListStr(lambda) { // "(+1 − 1 …)"
     const parts = lambda.map(function (L) {
       if (L.coeff < 0) { return String(L.coeff); }
@@ -192,65 +245,101 @@
       const ref = result.steps[step.refStep - 1];
       const sent = (REF_SENTENCE[step.theorem ? step.theorem.key : 'sig'] || '第{j}步已证同样的关系；这里对应地得到').replace('{j}', String(step.refStep));
       pb.push(P(S('本步用到的结论已经在' + (ref.theorem ? '第 ' + step.refStep + ' 步（' + ref.theorem.name + '）' : '第 ' + step.refStep + ' 步') + '证明过：那里证明了 '), B(ref ? identityStr(ref) : ''), S('。' + sent + '：'), B(identityStr(step) + '。')));
+    } else if (step.theorem && step.theorem.key === 'line-complete') {
+      // 补线法：整线之和 = S，去掉已知的其余格
+      const lam = step.identity.lambda[0];
+      const others = lam.cells.filter(function (c) { return c !== step.target; });
+      const cells = [];
+      for (let i = 0; i < model.N; i++) {
+        if (i === step.target) cells.push({ text: model.letters[i], kind: 'blue' });
+        else if (others.indexOf(i) >= 0) cells.push({ text: model.letters[i], kind: 'new' });
+        else cells.push({ text: '·', kind: 'dot' });
+      }
+      pb.push(P(S('这条线（' + lam.name + '）上 ' + n + ' 个数之和就是幻和 S。图中蓝色 = 要求的格子，黄色 = 线上的其余 ' + (n - 1) + ' 格（都已知道）：')));
+      pb.push(GRID(model.n, cells, [S('整条线之和 = S；从中去掉黄色各格，剩下的蓝色格就是答案')]));
+      pb.push(P(S('写成式子：'), B('S = ' + model.letters[step.target] + ' + ' + others.map(function (c) { return model.letters[c]; }).join(' + ')),
+        S('，移项得 '), B(identityStr(step)), S('。∎')));
+    } else if (step.theorem && step.theorem.key === 'S-line') {
+      const lam = step.identity.lambda[0];
+      pb.push(P(S('幻和的定义就是“每条线上的 ' + n + ' 个数之和”。这条线（' + lam.name + '）上的数都已知道，所以直接相加就得到 S：'), B(identityStr(step)), S('。∎')));
+    } else if (step.theorem && step.theorem.key === 'knight3' && knightGroups(model, step)) {
+      // 马步定理：用“过角三线”与“全部行线”两组求和后看重合
+      const kg = knightGroups(model, step);
+      const redNames = kg.redLines.map(function (li) { return model.lines[li].name; }).join('、');
+      const blueNames = kg.blueLines.map(function (li) { return model.lines[li].name; }).join('、');
+      pb.push(P(S('用两组线来比：'), B('红组 = 过角格的 ' + kg.redLines.length + ' 条线（' + redNames + '）'),
+        S('；'), B('蓝组 = 全部 ' + kg.blueLines.length + ' 条行线（' + blueNames + '，正好覆盖整个方阵）'), S('。')));
+      pb.push(P(S('红组有 ' + kg.kRed + ' 条线，和 = ' + kg.kRed + '·S = ' + kg.kRed + 'S；蓝组也是 ' + kg.kBlue + ' 条线，和 = ' + kg.kBlue + 'S。两组相等。')));
+      pb.push(GRID(model.n, kg.cells, [S('红组多出的格子 = ', { cls: 'err', b: 1 }), S('蓝组多出的格子', { cls: 'given', b: 1 }), S('（灰点 = 两组重合、已抵消）')]));
+      pb.push(P(S('看重合部分：两组都包含的格子（' + kg.cancelledNames + '）在两边各出现同样的次数，互相抵消；红色行线在两边都有，也先抵消。抵消后剩下：'),
+        B(kg.redStr, { cls: 'err' }), S('（红组）与 '), B(kg.blueStr, { cls: 'given' }), S('（蓝组）。')));
+      pb.push(P(S('所以 '), B(kg.redStr + ' = ' + kg.blueStr), S('，即 '), B(identityStr(step)), S('。∎')));
     } else {
       const lam = step.identity.lambda;
       const T = step.identity.T;
-      const tech = step.identity.tech || 4;
-      pb.push(P(S(n + ' 阶幻方中，每条行、列及两条对角线的和都等于同一个幻和 S。本步用到下列线（系数用于加权求和）：')));
-      pb.push(TBL(
-        [S('系数'), S('这条线的和'), S('是哪条线')],
-        lam.map(function (L) {
-          let coeffStr;
-          if (L.coeff < 0) { coeffStr = String(L.coeff); } else { coeffStr = '+' + L.coeff; }
-          return [S(coeffStr), S('(' + L.cells.map(function (c) { return model.letters[c]; }).join(' + ') + ')'), S(L.name)];
-        })
-      ));
-
-      // 技巧一（幻和直用）/ 技巧二（两线去交叉）/ 技巧三（多线容斥）：画块示意
-      const reg = step.identity.regions;
-      if (reg && (reg.red.length || reg.blue.length)) {
-        const redSet = new Map(reg.red.map(function (e) { return [e.cell, e.count]; }));
-        const blueSet = new Map(reg.blue.map(function (e) { return [e.cell, e.count]; }));
-        const cells = [];
-        for (let i = 0; i < model.N; i++) {
-          if (redSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: redSet.get(i) }), kind: 'red' });
-          else if (blueSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: blueSet.get(i) }), kind: 'blue' });
-          else cells.push({ text: '·', kind: 'dot' });
-        }
-        pb.push(P(S(tech === 2
-          ? '画块示意（两线去交叉）：两条线的和相等，先去掉它们的交叉格（两边各一个，正好抵消），剩下的红、蓝两部分的和也相等：'
-          : '画块示意（多线去交叉）：把系数为正的线相加、系数为负的线相减，重叠的格子成对抵消，只剩下红色的格子与蓝色的格子（×n 表示出现 n 次）：')));
-        pb.push(GRID(model.n, cells, [
-          S('红色部分的和', { cls: 'err', b: 1 }), S(' = ', { b: 1 }),
-          S('蓝色部分的和' + (T === 0 ? '' : ' + ' + T + '×S'), { cls: 'given', b: 1 }),
-          S('　（灰点 = 已抵消/未涉及的格子）')
-        ]));
-        const redEq = regionStr(model, reg.red);
-        const blueEq = regionStr(model, reg.blue);
-        let eqText = redEq + ' = ';
-        if (T === 0) eqText += blueEq;
-        else eqText += (reg.blue.length ? blueEq + ' + ' : '') + T + '×S';
-        pb.push(P(S('用字母写就是：'), B(eqEqSafe(eqText)), S('，整理即得'), B('　' + identityStr(step) + '　'), S('。')));
+      // 红组 = 系数为正的线；蓝组 = 系数为负的线（都按次数计），全部用“相加”表述，不出现负系数
+      const red = [], blue = [];
+      for (const L of lam) {
+        const cnt = L.coeff < 0 ? -L.coeff : L.coeff;
+        for (let q = 0; q < cnt; q++) (L.coeff > 0 ? red : blue).push(L.lineIdx);
       }
+      const kRed = red.length, kBlue = blue.length;
+      const redMap = new Map(), blueMap = new Map();
+      for (const li of red) for (const c of model.lines[li].cells) redMap.set(c, (redMap.get(c) || 0) + 1);
+      for (const li of blue) for (const c of model.lines[li].cells) blueMap.set(c, (blueMap.get(c) || 0) + 1);
+      const allCells = new Set(Array.from(redMap.keys()).concat(Array.from(blueMap.keys())));
+      const cancelled = [], redOnly = [], blueOnly = [];
+      for (const c of allCells) {
+        const r = redMap.get(c) || 0, b = blueMap.get(c) || 0;
+        const m = Math.min(r, b);
+        if (m > 0) cancelled.push({ cell: c, count: m });
+        if (r - m > 0) redOnly.push({ cell: c, count: r - m });
+        if (b - m > 0) blueOnly.push({ cell: c, count: b - m });
+      }
+      redOnly.sort(function (a, b) { return a.cell - b.cell; });
+      blueOnly.sort(function (a, b) { return a.cell - b.cell; });
+      cancelled.sort(function (a, b) { return a.cell - b.cell; });
 
-      pb.push(P(S('把它们按系数加权相加：左边 = '), B(expansionStr(step)), S('；右边 = ' + coeffListStr(lam) + '×S = ' + T + '×S。')));
-      pb.push(P(S('于是 '), B(expansionStr(step) + ' = ' + T + '×S'), S('，移项整理得'), B('　' + identityStr(step) + '　'), S('。证毕。∎')));
-      // 通俗解释（按技巧分级给说法）
-      const posL = lam.filter(function (L) { return L.coeff > 0; }).map(function (L) { return L.name; });
-      const negL = lam.filter(function (L) { return L.coeff < 0; }).map(function (L) { return L.name; });
-      let col;
-      if (tech === 1) {
-        col = '通俗地说：这条线上 ' + n + ' 个数的和就是幻和 S，所以线上缺哪个数，用 S 减去其余的数就得到了。';
-      } else if (reg && (reg.red.length || reg.blue.length)) {
-        const rs = regionStr(model, reg.red), bs = regionStr(model, reg.blue);
-        col = '通俗地说：每条线的和都等于 S，所以“红线组加起来”与“蓝线组加起来”里的重叠格子两边各出现同样多次，互相抵消（容斥），剩下：' + rs + ' = ' + (T === 0 ? bs : bs + ' + ' + T + '×S') + '。这就是“去掉交叉部分，剩余部分之和相等”的技巧。';
-      } else if (T === 0) {
-        col = '通俗地说：这些线的和全是同一个数 S。把带正号的线（' + posL.join('、') + '）的“和”全部加起来，再减去带负号的线（' + (negL.join('、') || '无') + '）的“和”，右边的 S 恰好全部抵消；左边逐个字母清点，出现次数相同的字母相互抵消，只剩下 ' + expansionStr(step) + ' = 0，即 ' + identityStr(step) + '。';
+      pb.push(P(S('把本步用到的线分成两组（每条线算一次；同一条线用两次就写两次）：')));
+      const rowsTbl = [];
+      if (red.length) rowsTbl.push([S('红组'), S(red.map(function (li) { return model.lines[li].name; }).join('、')), S(String(kRed)), S(kRed + '·S')]);
+      if (blue.length) rowsTbl.push([S('蓝组'), S(blue.map(function (li) { return model.lines[li].name; }).join('、')), S(String(kBlue)), S(kBlue + '·S')]);
+      pb.push(TBL([S('组'), S('这条组里的线'), S('条数'), S('这组的和')], rowsTbl));
+      pb.push(P(S('每条线的和都是 S。所以红组之和 = ' + kRed + 'S，蓝组之和 = ' + kBlue + 'S。'),
+        S(kRed === kBlue ? '两组条数相同，所以 红组之和 = 蓝组之和。'
+          : (kRed > kBlue ? '红组比蓝组多 ' + (kRed - kBlue) + ' 条线，所以 红组之和比蓝组之和多 ' + (kRed - kBlue) + 'S。'
+            : '蓝组比红组多 ' + (kBlue - kRed) + ' 条线，所以 蓝组之和比红组之和多 ' + (kBlue - kRed) + 'S。'))));
+
+      // 画块
+      const cells = [];
+      const redSet = new Map(redOnly.map(function (e) { return [e.cell, e.count]; }));
+      const blueSet = new Map(blueOnly.map(function (e) { return [e.cell, e.count]; }));
+      for (let i = 0; i < model.N; i++) {
+        if (redSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: redSet.get(i) }), kind: 'red' });
+        else if (blueSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: blueSet.get(i) }), kind: 'blue' });
+        else cells.push({ text: '·', kind: 'dot' });
+      }
+      pb.push(P(S('看重合部分：两组都出现的格子（' + (cancelled.length ? cancelled.map(function (e) { return model.letters[e.cell]; }).join('、') : '无') + '）在两边出现次数相同，互相抵消、去掉。剩下：')));
+      pb.push(GRID(model.n, cells, [S('红组多出的格子', { cls: 'err', b: 1 }), S(' 与 '), S('蓝组多出的格子', { cls: 'given', b: 1 }), S('（“2·a”表示 a 出现 2 次；灰点 = 已抵消或未用到）')]));
+      const redStr = redOnly.length ? redOnly.map(function (e) { return (e.count > 1 ? e.count + '·' : '') + model.letters[e.cell]; }).join(' + ') : '0';
+      const blueStr = blueOnly.length ? blueOnly.map(function (e) { return (e.count > 1 ? e.count + '·' : '') + model.letters[e.cell]; }).join(' + ') : '0';
+      let rel;
+      if (kRed === kBlue) rel = redStr + ' = ' + blueStr;
+      else if (kRed > kBlue) rel = redStr + ' = ' + blueStr + ' + ' + (kRed - kBlue) + 'S';
+      else rel = blueStr + ' = ' + redStr + ' + ' + (kBlue - kRed) + 'S';
+      pb.push(P(S('于是 '), B(rel), S('。')));
+
+      // 结合 S 是已知/待求以及 γ，收束到最终恒等式
+      let tail = '';
+      if (step.isS) {
+        tail = '本步要求的就是 S：把上式整理（S 只出现在一侧）即可解出 ' + identityStr(step) + '。';
+      } else if (step.premises.some(function (p) { return p.isS; })) {
+        tail = '把已知的 S = ' + (step.premises.find(function (p) { return p.isS; }) || {}).valueStr + ' 代入，移项即得 ' + identityStr(step) + '。';
       } else {
-        col = '通俗地说：这些线的和全是同一个数 S。把它们按系数加权相加，右边就是 ' + T + '×S；左边逐个字母清点、合并同类项，得到 ' + expansionStr(step) + '。两边相等并移项，就得到 ' + identityStr(step) + '。';
+        tail = '移项即得 ' + identityStr(step) + '。';
       }
-      col += '这个关系对任何 ' + n + ' 阶幻方都成立。';
-      pb.push(P(S(col, { cls: 'dim' })));
+      if (step.identity.gamma !== 1) tail += '（两边再同时除以 ' + step.identity.gamma + '。）';
+      pb.push(P(S(tail + '这个关系对任何 ' + n + ' 阶幻方都成立。∎')));
     }
     bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: pb });
 
