@@ -4,14 +4,15 @@
 > 目录：`D:\glm-db\.zcode\workspace\draft-85724259-c664-4d90-9290-644bc2e3e3dc\magic-square-solver\`
 > 仓库：https://github.com/qyrh/magic-square-solver 　在线：https://qyrh.github.io/magic-square-solver/
 > 单文件：`dist/幻方求解器.html`（由 `node build.js` 生成）
-> 最后更新：2026-11-06（第 7 轮：示例两字折叠+点击写入、删首页说明页+“?”帮助弹窗、
-> 全阶×全模式穷尽验证 verify-all.js、修 n≥5 限定模式超范围漏校验；index.html ?v=23）
+> 最后更新：2026-11-06（第 8 轮：classic/set 示例改用穷举合法填法（不再出分数）、
+> 示例展示改方格图卡片、4 个审查子代理 15 项发现全部修复；index.html ?v=24。
+> 第 7 轮：示例折叠+点击写入、删首页说明页+“?”帮助、verify-all 全矩阵、超范围校验）
 
 ## 0. 一分钟上手
 
 ```bash
 cd magic-square-solver
-node test-core.js     # 198 项断言（必须全过；含 3–8 阶 × 4 值域矩阵冒烟）
+node test-core.js     # 214 项断言（必须全过；含 3–8 阶 × 4 值域矩阵冒烟 + 示例合法性回归）
 node test-docx.js     # 文档块 + DOCX 结构自检
 node verify-all.js    # 全阶数(3–8)×全模式(4种)穷尽验证：177 例 + DOCX 6 个 Python 校验
 node build.js         # 生成 dist/幻方求解器.html 单文件版（会自检无外链脚本）
@@ -245,6 +246,42 @@ gh api repos/qyrh/magic-square-solver/pages/builds/latest -q '.status'
    dist 单文件 0 外链脚本、无 console 错误；截图经视觉模型走查通过。
 7. **判例补充**：Mimosa 钩子会拦 `ElementTree`（XML 实体扩展）与动态 `path.join` 进 fs 写——
    Python 校验改自实现标签配平（先拒 DOCTYPE/ENTITY + 大小上限）；Node 写文件用**字面量路径表**。
+
+## 8.8 第 8 轮改动（classic/set 示例违反值域修复 + 示例改方格图 + 子代理逐行审查，2026-11-06）
+
+1. **用户投诉的 bug**：classic/set 模式总结页示例原用有理方向（part + D·t）构造，出现分数、
+   违反“每个数恰好用一次”。**修复**：`assembleResult` 对 distinct 模式示例只取 `csp.samples`
+   （穷举合法填法，样本 ≥2 且未完整解时才给）；sampling 与有理示例对 distinct 彻底关闭
+   （n≥5 不穷举 → 宁可不给示例）；integer 模式保持整数见证路径。
+2. **示例展示改为方格图**：`app.js: renderBlock('examples')` 展开后每组是一张
+   正方形网格卡片（`table.ms` + 立体分数 + given/diff/unknown 着色 + “示例 k”标题），
+   点击卡片写入填写区；不再是线性文本行。打印时隐藏胶囊、强制展开卡片。
+3. **4 个审查子代理逐文件审查（共 15 项发现，全部修复）**，要点：
+   - **[Critical] set 模式第 1 步假等式**：“1 + 2 + … + 9 = 90”——`domainSBlocks` 按
+     `step.domainKind` 分支，set 写“全部限定数字相加”。
+   - **[Critical] 点击穷举定格 TypeError**：csp 步 `cell:null`，`openStepModal` 现在
+     特判 special 步（标题“穷举确定的格子（g、k）”，依据行为穷举验证）。
+   - **[Critical] `exactDecimal` 浮点失真**：`f.n * 10^k` 超 2^53 产出 `'0.01.4…e+21'` 坏串 →
+     parse 抛异常。改为纯整数运算（10^k/f.d = 2^(k-c2)·5^(k-c5)），超精确范围退回分数显示。
+   - **[中] integer 示例 S 标注错**：示例沿整数方向平移时 S 会变，逐例计算
+     `S = w[N] + k·pickDir[N]`（回归：a=100,b=200 断言行和 = 标注 S）。
+   - **[中] integer 随机分支谎称“穷尽无解”**：`checkIntegerSolutions` 增加 `exact` 标志；
+     随机未找到 → `feasible:null` + 诚实文案（“不构成无解证明”），solveMagic 不再 ok:false，
+     且 integer 模式不再回落到有理 sampleCompletions；render 对 feasible===null 用灰色非红色。
+   - **[中] 切阶数不刷新值域 UI**：selN change 补 `syncDomainUI()`（否则 customSet 滞留旧阶数）。
+   - **[中] 反例双填法标色失实**：①/② 改“成对真实差异”标色（`varyingAmong`），
+     恰好相同的未定格标灰（kind unknown），caption 如实描述红/灰含义。
+   - **[低] 其余**：Frac 拒绝 NaN/Infinity/非整数（曾 gcd 死循环）；填数顺序一览表
+     domain-S/csp 步专用行（原来显示 “null”/“线性恒等式”）；删 setQuickBar 的
+     `view==='full'` 死分支；卡片 title 带上诚实说明；打印隐藏示例胶囊。
+4. **verify-all 6b 新增“全模式示例合法性”断言**：examples/sampling.samples/csp.samples 的
+   每张网格必须 (a) 是真幻方（2n+2 线和相等）(b) 保留全部已知数 (c) classic/set 时是
+   multiset 的精确排列；integer 有已知且未完整解时必须给 2 组整数示例。
+   test-core 新增长小数/Frac NaN/integer S 标注回归，共 **214 项**。
+5. E2E（罐头）：classic 3 阶示例 = 3 张 1..9 方格卡片（视觉模型核验各 1..9 一次、无分数、
+   三张互不相同）；4 阶 classic 示例 = 1..16 排列；点击穷举定格弹窗正常。
+6. 已知机器相关项（保留）：verify-all 单例 2s 上限 vs 4 阶 CSP 墙钟截断（maxMs=1500），
+   本机最慢 918ms 余量 ~2 倍；慢机可能假 FAIL，可放宽 TIME_LIMIT_MS。
 
 ## 9. 用户偏好（沟通/设计）
 
