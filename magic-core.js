@@ -1015,6 +1015,19 @@
     } else if (kind === 'integer') {
       out.note = '只允许整数';
     }
+    // 有限值域（classic/set）：所有已知数必须在限定数字内且不超份数（对任意阶数生效，
+    // n≥5 不跑穷举时也要在此拦下，不能等 CSP 才发现）
+    if (out.multiset) {
+      const cnt = new Map();
+      for (const v of out.multiset) { const k = v.toString(); cnt.set(k, (cnt.get(k) || 0) + 1); }
+      for (const e of givenMap) {
+        if (e[0] === SC) continue;
+        const k = e[1].toString();
+        const c = cnt.get(k) || 0;
+        if (c <= 0) return { error: '已知数 ' + fmtNumber(e[1]) + ' 不在限定的数字范围内（或超出份数）。' };
+        cnt.set(k, c - 1);
+      }
+    }
     return out;
   }
 
