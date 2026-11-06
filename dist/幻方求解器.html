@@ -157,6 +157,14 @@
         </select>
       </label>
       <label class="chk" title="每填入/修改一个数字后自动重新出数"><input type="checkbox" id="autoSolve" checked> 输入即自动出数</label>
+      <label>值域：
+        <select id="selDomain" title="限定每个格子允许使用的数字范围；求解与证明策略会随之改变">
+          <option value="none">不限定（任意有理数）</option>
+          <option value="integer">只允许整数（从候选最少的格子试填）</option>
+          <option value="classic">1…n²（各用一次，可直接得幻和）</option>
+          <option value="set">自定义数字集合（n² 个，各用一次）</option>
+        </select>
+      </label>
       <button class="ghost" id="btnUndo" title="Ctrl+Z">↩ 撤回</button>
       <button class="ghost" id="btnRedo" title="Ctrl+Y">↪ 重做</button>
       <button class="ghost" id="btnBatchToggle">批量填入…</button>
@@ -165,11 +173,19 @@
       <button class="big" id="btnSolve">求 解</button>
     </div>
     <div id="gridBox"></div>
+    <div id="setBox" style="display:none; margin-top:8px;">
+      <label style="font-size:14px;">限定数字（恰好 n² 个，用空格/逗号分隔，每个用一次）：
+        <input type="text" id="customSet" placeholder="例如：1 2 3 4 5 6 7 8 9">
+      </label>
+      <button class="ghost" id="btnSetApply" style="margin-left:6px;">应用</button>
+      <div class="hint" id="setHint">提示：填满 9 个数即可（可用分数/负数，如 -3 0.5 2/3 …）。</div>
+    </div>
     <div id="batchBox" style="display:none; margin-top:8px;">
       <textarea id="batchText" rows="4" placeholder="按行粘贴数字，空格/逗号分隔，空缺用 - 或 . 表示，例如：&#10;2 7 -&#10;- 5 -&#10;- - 9"></textarea>
       <div style="margin-top:4px;"><button class="ghost" id="btnBatchApply">应用到表格</button></div>
     </div>
     <div class="hint" style="margin-top:6px;">每个格子可填：整数（如 <code>12</code>）、分数（如 <code>1/2</code>、<code>10/4</code>）、小数（如 <code>0.75</code>）、甚至 <code>1.5/2</code>；留空 = 未知。<b>能确定的数会自动回填到填写框</b>（绿色斜体 = 自动推出，直接输入可把它改成已知数，双击可查看证明）；黑色 = 你输入的已知数。<b>↩ 撤回 / ↪ 重做</b>（Ctrl+Z / Ctrl+Y）可回退任何填写操作。输出自动选有效数字更少的表示（平手取最简分数），图中分数以上下分式呈现。</div>
+    <div class="hint" style="margin-top:4px;"><b>值域限定</b>：选「1…n²」或「自定义集合」时，程序先用“n 条行线之和 = nS = 全部数字之和”直接算出幻和，再据幻和逐步推出；并在限定范围内<b>穷举所有合法填法</b>，用“该格在所有填法中都等于同一个值”来证明某格确定（也用于发现无解，如 1…9 时角格不可能是 1）。选「只允许整数」时，程序检查可确定的数是否都是整数，并尝试构造整数填法作为见证；若只能取分数则报告无解（如三阶 a=1, i=2 会使中心 = 3/2）。</div>
     <div class="hint" style="margin-top:4px;">示例：</div>
     <div class="controls" style="margin-top:2px;">
       <button class="ghost" data-preset="two">三阶·两数定一格</button>
@@ -649,15 +665,57 @@
   }
 
   /* ---------------- 逐步推导主循环 ---------------- */
-  function sourceLabel(srcIdx) { return srcIdx == null ? '题设' : '第' + srcIdx + '步'; }
-
   function scoreLess(a, b) {
     for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] < b[i]; }
     return false;
   }
 
-  function* deduceStepsGen(model, givens, determinedSet, valueOf) {
+  /* 直接构造“幻和直用”的两类恒等式（技巧 1，最简单） */
+  // 补线法：x_k = S − 同线其余格（该线其余格都已知时可用）
+  function lineCompletionIdentity(model, target, known) {
     const SC = model.SC;
+    if (!known.has(SC)) return null;
+    let best = null, bestLen = Infinity;
+    for (let li = 0; li < model.lines.length; li++) {
+      const L = model.lines[li];
+      if (L.cells.indexOf(target) < 0) continue;
+      let ok = true;
+      for (let q = 0; q < L.cells.length; q++) {
+        const c = L.cells[q];
+        if (c !== target && !known.has(c)) { ok = false; break; }
+      }
+      if (!ok || L.cells.length >= bestLen) continue;
+      const alphaMap = new Map();
+      alphaMap.set(SC, 1);
+      for (const c of L.cells) if (c !== target) alphaMap.set(c, -1);
+      const lambdaMap = new Map(); lambdaMap.set(li, 1);
+      best = { gamma: 1, alphaMap: alphaMap, lambdaMap: lambdaMap, T: 1 };
+      bestLen = L.cells.length;
+    }
+    return best;
+  }
+  // 幻和定理：S = 整线之和（某条线全已知时可用）
+  function sLineIdentity(model, known) {
+    const SC = model.SC;
+    let best = null, bestLen = Infinity;
+    for (let li = 0; li < model.lines.length; li++) {
+      const L = model.lines[li];
+      let ok = true;
+      for (let q = 0; q < L.cells.length; q++) { if (!known.has(L.cells[q])) { ok = false; break; } }
+      if (!ok || L.cells.length >= bestLen) continue;
+      const alphaMap = new Map();
+      for (const c of L.cells) alphaMap.set(c, 1);
+      const lambdaMap = new Map(); lambdaMap.set(li, -1);
+      best = { gamma: 1, alphaMap: alphaMap, lambdaMap: lambdaMap, T: -1 };
+      bestLen = L.cells.length;
+    }
+    return best;
+  }
+
+  function* deduceStepsGen(model, givens, determinedSet, valueOf, opts) {
+    const SC = model.SC;
+    const baseIndex = (opts && opts.baseIndex) || 1;
+    const labels = (opts && opts.labels) || new Map();
     const known = new Map(givens);
     const knownEntries = Array.from(givens.keys()).map(function (c) { return { coord: c, source: null }; });
     const sourceMap = new Map(); knownEntries.forEach(function (e) { sourceMap.set(e.coord, null); });
@@ -673,51 +731,76 @@
       for (let c = 0; c < model.N; c++) if (pending.has(c)) targets.push(c);
       if (pending.has(SC)) targets.push(SC);
 
-      // 第一轮筛选：找出“最少已知数”的目标（并列收集，S 仅在严格更少时入选）
-      let bestD = Infinity;
-      let tied = [];
+      // 收集所有候选结论 + 证明，按“证明最简单”统一择优：
+      // 技巧分级（幻和直用最先）→ 涉及行列数(系数计入) → 涉及格子数 → 前提数 → 已命名定理 → 少除法
+      const cands = [];
+      let minD = Infinity;
+      const stCache = [];
       for (const t of targets) {
         const prev = prevState.get(t) || null;
         const st = findMinimal(model, t, Array.from(known.keys()), prev, newCoord);
         if (st === null) throw new Error('内部错误：目标无法推导');
         prevState.set(t, st);
-        if (st.d < bestD) {
-          bestD = st.d; tied = [{ target: t, st: st }];
-        } else if (st.d === bestD && t !== SC) {
-          if (tied.length < 6) tied.push({ target: t, st: st });
+        stCache.push({ t: t, st: st });
+        if (st.d < minD) minD = st.d;
+      }
+      for (const item of stCache) {
+        const t = item.t, st = item.st;
+        // ① 幻和直用（可直接构造，无需解方程，技巧分级 1）
+        if (t !== SC) {
+          const lc = lineCompletionIdentity(model, t, known);
+          if (lc) cands.push({ target: t, id: lc, thm: { key: 'line-complete', name: '补线法（幻和 − 其余格）' }, d: lc.alphaMap.size });
+        } else {
+          const sl = sLineIdentity(model, known);
+          if (sl) cands.push({ target: SC, id: sl, thm: { key: 'S-line', name: '幻和定理（整线求 S）' }, d: sl.alphaMap.size });
+        }
+        // ② 其他恒等式（只为接近最优前提数的目标求解，控制计算量）
+        if (st.d <= minD + 1) {
+          for (const C of st.Cs.slice(0, 3)) {
+            const id = solveIdentity(model, t, C);
+            if (id === null) continue;
+            const thm = recognizeTheorem(model, t, C, id.alphaMap, id.gamma);
+            cands.push({ target: t, id: id, thm: thm, d: C.length });
+          }
         }
       }
 
-      // 第二轮筛选：并列目标中挑证明最简洁的（优先已命名定理 → 用线更少 → 系数更小 → 行序在前）
-      let chosen = null, chosenTarget = null;
-      for (const tie of tied) {
-        for (const C of tie.st.Cs.slice(0, 4)) {
-          const id = solveIdentity(model, tie.target, C);
-          if (id === null) continue;
-          const thm = recognizeTheorem(model, tie.target, C, id.alphaMap, id.gamma);
-          let lamSum = 0;
-          const lamVals = Array.from(id.lambdaMap.values());
-          for (let q = 0; q < lamVals.length; q++) {
-            const v = lamVals[q];
-            if (v < 0) { lamSum = lamSum - v; } else { lamSum = lamSum + v; }
-          }
-          const tech = techniqueClass(id.lambdaMap);   // 技巧分级：1幻和直用 2两线去交叉 3多线容斥 4一般
-          const score = [
-            tech,
-            thm ? (THEOREM_RANK[thm.key] !== undefined ? THEOREM_RANK[thm.key] : 9) : 9,
-            id.lambdaMap.size, lamSum,
-            tie.target === SC ? 1 : 0, tie.target
-          ];
-          if (chosen === null || scoreLess(score, chosen.score)) {
-            chosen = { C: C, id: id, thm: thm, score: score };
-            chosen.id.tech = tech;
-            chosenTarget = tie.target;
-          }
+      let chosen = null;
+      for (const cd of cands) {
+        const id = cd.id;
+        let lamSum = 0;
+        const lamVals = Array.from(id.lambdaMap.values());
+        for (let q = 0; q < lamVals.length; q++) {
+          const v = lamVals[q];
+          if (v < 0) { lamSum = lamSum - v; } else { lamSum = lamSum + v; }
         }
+        const tech = techniqueClass(id.lambdaMap);   // 1幻和直用 2两线去交叉 3多线去交叉 4一般
+        // 涉及到的格子数（目标格、前提格、以及各条线覆盖的格子）
+        const inv = new Set();
+        for (const e of id.lambdaMap) {
+          const cells = model.lines[e[0]].cells;
+          for (let q = 0; q < cells.length; q++) inv.add(cells[q]);
+        }
+        for (const c of id.alphaMap.keys()) { if (c !== SC) inv.add(c); }
+        if (cd.target !== SC) inv.add(cd.target);
+        const rank = cd.thm ? (THEOREM_RANK[cd.thm.key] !== undefined ? THEOREM_RANK[cd.thm.key] : 9) : 9;
+        const score = [
+          tech,                        // ① 技巧从简：幻和直用最优先
+          lamSum,                      // ② 涉及的行列数（带系数按次数计入）
+          inv.size,                    // ③ 涉及的格子数（越少越好）
+          cd.d,                        // ④ 前提数（越少越好）
+          rank,                        // ⑤ 已命名定理优先（对顶/马步/中心…）
+          id.gamma === 1 ? 0 : 1,      // ⑥ 能整除优先（少一次除法）
+          cd.target === SC ? 1 : 0,    // ⑦ 同分时先出格子
+          cd.target
+        ];
+        cd.tech = tech; cd.score = score;
+        if (chosen === null || scoreLess(score, chosen.score)) chosen = cd;
       }
       if (chosen === null) throw new Error('内部错误：恒等式求解失败');
 
-      const id = chosen.id, k = chosenTarget;
+      const id = chosen.id, k = chosen.target;
+      chosen.id.tech = chosen.tech;
       const Ceff = Array.from(id.alphaMap.keys());
       // 计算数值并交叉校验
       let acc = new Frac(0);
@@ -729,9 +812,9 @@
       const key = thm ? thm.key :
         ('sig|' + id.gamma + '|' + Ceff.slice().sort(function (a, b) { return a - b; }).map(function (c) { return c + ':' + id.alphaMap.get(c); }).join(','));
       const refStep = firstProof.has(key) ? firstProof.get(key) : null;
-      if (refStep === null) firstProof.set(key, steps.length + 1);
+      if (refStep === null) firstProof.set(key, steps.length + baseIndex);
 
-      const stepIdx = steps.length + 1;
+      const stepIdx = steps.length + baseIndex;
       const premises = Ceff.slice().sort(function (a, b) {
         const sa = (a === SC ? 1 : 0), sb = (b === SC ? 1 : 0);
         return sa - sb || a - b;
@@ -741,7 +824,7 @@
           label: c === SC ? 'S' : model.letters[c],
           coeff: id.alphaMap.get(c),
           valueStr: fmtNumber(known.get(c)),
-          source: sourceLabel(sourceMap.get(c)),
+          source: sourceMap.get(c) == null ? (labels.get(c) || '题设') : ('第' + sourceMap.get(c) + '步'),
           sourceIdx: sourceMap.get(c)
         };
       });
@@ -788,7 +871,7 @@
         identity: {
             gamma: id.gamma, T: id.T, terms: termsOrdered, expansion: expansion, lambda: lambdaList,
             tech: id.tech,
-            regions: id.tech === 2 || id.tech === 3 ? regionsToArrays(buildRegions(model, id.lambdaMap)) : null
+            regions: id.tech >= 2 ? regionsToArrays(buildRegions(model, id.lambdaMap)) : null
           },
         theorem: thm, refStep: refStep,
         involvedCells: Array.from(involved),
@@ -799,8 +882,8 @@
   }
 
   /** 同步消费推导生成器 */
-  function deduceSteps(model, givens, determinedSet, valueOf) {
-    const g = deduceStepsGen(model, givens, determinedSet, valueOf);
+  function deduceSteps(model, givens, determinedSet, valueOf, opts) {
+    const g = deduceStepsGen(model, givens, determinedSet, valueOf, opts);
     let last;
     while (true) { const r = g.next(); if (r.done) { last = r.value; break; } }
     return last;
@@ -853,12 +936,286 @@
     return { count: K, samples: [grids[0], grids[1], grids[2]], stableCells: stableCells, agreeWithLinear: agree, unique: false };
   }
 
-  /* ---------------- 对外主接口 ---------------- */
-  function prepareSolve(n, givenMap) {
+  /* ---------------- 有限值域：穷举求解（CSP） ----------------
+   * multiset 中的数字恰好各用一次（classic / 自定义集合）。
+   * 用“最少剩余 + 线剩余和剪枝”的回溯穷尽所有合法填法：
+   *   - 穷尽完成：某格在所有解里取同一值 ⟺ 该格可确定（这就是“为什么能确定”的证明）
+   *   - 达到上限未穷尽：只声称线性可确定的格子，并如实说明未穷尽
+   */
+  function solveCSP(model, givensAll, multiset, Sval, limits) {
+    limits = limits || {};
+    const N = model.N, SC = model.SC;
+    const maxSolutions = limits.maxSolutions || 120;
+    const maxNodes = limits.maxNodes || 160000;
+    const maxMs = limits.maxMs || 900;
+
+    const cnt = new Map();   // 值（字符串）→ 剩余个数
+    const val = new Map();   // 值（字符串）→ Frac
+    for (const v of multiset) { const k = v.toString(); cnt.set(k, (cnt.get(k) || 0) + 1); val.set(k, v); }
+
+    const fixed = new Map();
+    for (const e of givensAll) {
+      if (e[0] === SC) continue;
+      const k = e[1].toString();
+      const c = cnt.get(k) || 0;
+      if (c <= 0) return { error: '已知数 ' + fmtNumber(e[1]) + ' 不在限定的数字范围内（或超出份数）。' };
+      cnt.set(k, c - 1);
+      fixed.set(e[0], e[1]);
+    }
+
+    const assign = new Array(N).fill(null);
+    const cellLines = [];
+    for (let i = 0; i < N; i++) cellLines.push([]);
+    model.lines.forEach(function (L, li) { for (let q = 0; q < L.cells.length; q++) cellLines[L.cells[q]].push(li); });
+
+    const lineSum = new Array(model.lines.length).fill(F0);
+    const lineLeft = model.lines.map(function (L) { return L.cells.length; });
+    for (const e of fixed) {
+      assign[e[0]] = e[1];
+      for (const li of cellLines[e[0]]) { lineSum[li] = lineSum[li].add(e[1]); lineLeft[li] -= 1; }
+    }
+
+    const trail = [];
+    function put(cell, v) {
+      const k = v.toString();
+      cnt.set(k, cnt.get(k) - 1);
+      assign[cell] = v;
+      trail.push(cell);
+      for (const li of cellLines[cell]) { lineSum[li] = lineSum[li].add(v); lineLeft[li] -= 1; }
+    }
+    function take() {   // 撤销最近一次赋值（与 trail 同步弹出）
+      const cell = trail.pop();
+      const v = assign[cell];
+      const k = v.toString();
+      cnt.set(k, cnt.get(k) + 1);
+      assign[cell] = null;
+      for (const li of cellLines[cell]) { lineSum[li] = lineSum[li].sub(v); lineLeft[li] += 1; }
+    }
+
+    function availSorted() {
+      const out = [];
+      for (const e of cnt) {
+        if (e[1] <= 0) continue;
+        const v = val.get(e[0]);
+        for (let q = 0; q < e[1]; q++) out.push(v);
+      }
+      out.sort(function (a, b) { return a.toNumber() - b.toNumber(); });
+      return out;
+    }
+    function bounds(k) {
+      const arr = availSorted();
+      if (arr.length < k) return null;
+      let mn = new Frac(0), mx = new Frac(0);
+      for (let i = 0; i < k; i++) mn = mn.add(arr[i]);
+      for (let i = arr.length - k; i < arr.length; i++) mx = mx.add(arr[i]);
+      return [mn, mx];
+    }
+
+    const queue = [];
+    function propagate() {
+      while (queue.length) {
+        const li = queue.pop();
+        if (lineLeft[li] === 0) {
+          if (!lineSum[li].equals(Sval)) return false;
+          continue;
+        }
+        const need = Sval.sub(lineSum[li]);
+        const b = bounds(lineLeft[li]);
+        if (!b) return false;
+        if (need.toNumber() < b[0].toNumber() || need.toNumber() > b[1].toNumber()) return false;
+        if (lineLeft[li] === 1) {
+          let cell = -1;
+          const cells = model.lines[li].cells;
+          for (let q = 0; q < cells.length; q++) if (assign[cells[q]] === null) { cell = cells[q]; break; }
+          if (cell < 0) return false;
+          const k = need.toString();
+          if (!(cnt.get(k) > 0)) return false;
+          put(cell, need);
+          for (const l2 of cellLines[cell]) queue.push(l2);
+        }
+      }
+      return true;
+    }
+
+    const solutions = [];
+    let nodes = 0, stop = false, exhaustive = true;
+    const t0 = Date.now();
+
+    function search() {
+      if (stop) return;
+      nodes++;
+      if (nodes > maxNodes) { exhaustive = false; stop = true; return; }
+      if ((nodes & 255) === 0 && Date.now() - t0 > maxMs) { exhaustive = false; stop = true; return; }
+      if (trail.length === N - fixed.size) {
+        solutions.push(assign.map(fmtNumber));
+        if (solutions.length >= maxSolutions) { exhaustive = false; stop = true; }
+        return;
+      }
+      // 选线：剩余待填最少且 > 1 的线；再选该线上关联线最多的格子
+      let bestLine = -1;
+      for (let li = 0; li < model.lines.length; li++) {
+        if (lineLeft[li] <= 1) continue;
+        if (bestLine < 0 || lineLeft[li] < lineLeft[bestLine]) bestLine = li;
+      }
+      let cell = -1;
+      if (bestLine >= 0) {
+        const cells = model.lines[bestLine].cells;
+        for (let q = 0; q < cells.length; q++) {
+          const c = cells[q];
+          if (assign[c] !== null) continue;
+          if (cell < 0 || cellLines[c].length > cellLines[cell].length) cell = c;
+        }
+      }
+      if (cell < 0) { exhaustive = false; stop = true; return; }
+
+      const cands = [];
+      const seen = new Set();
+      for (const e of cnt) {
+        if (e[1] <= 0 || seen.has(e[0])) continue;
+        seen.add(e[0]);
+        cands.push(val.get(e[0]));
+      }
+      cands.sort(function (a, b) { return a.toNumber() - b.toNumber(); });
+
+      for (const v of cands) {
+        const mark = trail.length;
+        put(cell, v);
+        for (const li of cellLines[cell]) queue.push(li);
+        if (propagate()) search();
+        while (trail.length > mark) take();
+        if (stop) return;
+      }
+    }
+
+    for (let li = 0; li < model.lines.length; li++) queue.push(li);
+    if (!propagate()) return { error: '在限定数字与已知数下无解（线和对不上或数字不够用）。' };
+    search();
+
+    if (exhaustive && solutions.length === 0) {
+      return { error: '在限定的数字范围与已知数下无解（穷举完所有填法都不满足条件）。' };
+    }
+    const refuted = new Set();
+    const stable = new Set();
+    if (solutions.length > 0) {
+      for (let i = 0; i < N; i++) {
+        let same = true;
+        for (let t = 1; t < solutions.length; t++) if (solutions[t][i] !== solutions[0][i]) { same = false; break; }
+        if (same) stable.add(i); else refuted.add(i);
+      }
+    }
+    const stableCells = [];
+    for (let i = 0; i < N; i++) if (stable.has(i)) stableCells.push(i);
+    return {
+      ok: true, error: null,
+      exhaustive: exhaustive, count: solutions.length,
+      samples: solutions.slice(0, 3),
+      stableCells: stableCells,
+      refutedCells: Array.from(refuted),
+      allSolutionsFirst: solutions.length ? solutions[0] : null,
+      nodes: nodes
+    };
+  }
+
+  /* ---------------- 仅整数：整数性检查与整数解见证 ---------------- */
+  function checkIntegerSolutions(prep) {
+    const model = prep.model, part = prep.part, D = prep.D, determined = prep.determined;
+    const N = model.N;
+    const isInt = function (f) { return f.d === 1; };
+    const bad = [];
+    for (const c of determined) if (!isInt(part[c])) bad.push(c);
+    if (bad.length) {
+      const names = bad.map(function (c) { return c === model.SC ? 'S' : model.letters[c]; });
+      return {
+        feasible: false,
+        reason: '在“只允许整数”的限定下无解：' + names.join('、') + ' 只能取到分数（' +
+          bad.map(function (c) { return fmtNumber(part[c]); }).join('、') + '）。'
+      };
+    }
+    const m = D.length;
+    let found = null;
+    if (m === 0) {
+      if (part.every(isInt)) found = part.slice(0, N + 1);
+    } else {
+      const test = function (params) {
+        const pt = part.slice(0, N + 1);
+        for (let j = 0; j < params.length; j++) {
+          if (!params[j]) continue;
+          for (let i = 0; i <= N; i++) pt[i] = pt[i].add(D[j][i].mul(new Frac(params[j])));
+        }
+        for (let i = 0; i <= N; i++) if (!isInt(pt[i])) return null;
+        return pt;
+      };
+      if (m <= 4) {
+        const R = 4;
+        const cur = new Array(m).fill(0);
+        const rec = function (depth) {
+          if (found) return;
+          if (depth === m) { const w = test(cur); if (w) found = w; return; }
+          for (let v = -R; v <= R; v++) { cur[depth] = v; rec(depth + 1); if (found) return; }
+        };
+        rec(0);
+      } else {
+        let seed = 7717;
+        const rnd = function () { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+        for (let t = 0; t < 4000 && !found; t++) {
+          const cur = new Array(m);
+          for (let j = 0; j < m; j++) cur[j] = (rnd() % 9) - 4;
+          const w = test(cur);
+          if (w) found = w;
+        }
+      }
+    }
+    if (!found) {
+      return { feasible: null, reason: '未能在“只允许整数”的限定下找到整数填法（可尝试放宽限定或检查已知数）。' };
+    }
+    return { feasible: true, witness: found.slice(0, N).map(fmtNumber), S: fmtNumber(found[N]), reason: null };
+  }
+
+  /* ---------------- 值域限定 ----------------
+   * kind: 'none' | 'integer' | 'classic'（1…n² 各用一次）| 'set'（自定义 n² 个数各用一次）
+   */
+  function buildDomain(n, spec, givenMap) {
     const model = buildModel(n);
     const N = model.N, SC = model.SC;
+    const kind = (spec && spec.kind) || 'none';
+    const out = { kind: kind, S: null, multiset: null, distinct: false, labels: new Map(), note: null, total: null };
+    if (kind === 'classic') {
+      const vals = [];
+      for (let v = 1; v <= N; v++) vals.push(new Frac(v));
+      out.multiset = vals; out.distinct = true;
+      let total = new Frac(0);
+      for (const v of vals) total = total.add(v);
+      out.total = total;
+      out.S = total.div(new Frac(n));
+      out.labels.set(SC, '题设（1…' + N + ' 各用一次的幻和）');
+      out.note = '1…' + N + ' 各用一次';
+    } else if (kind === 'set') {
+      const vals = (spec.values || []).map(function (x) { return Frac.from(x); });
+      if (vals.length !== N) {
+        return { error: '“限定填入数字”需要恰好 n² = ' + N + ' 个数（每个用一次），当前提供了 ' + vals.length + ' 个。' };
+      }
+      out.multiset = vals; out.distinct = true;
+      let total = new Frac(0);
+      for (const v of vals) total = total.add(v);
+      out.total = total;
+      out.S = total.div(new Frac(n));
+      out.labels.set(SC, '题设（限定数字之和 ÷ ' + n + '）');
+      out.note = '限定数字各用一次';
+    } else if (kind === 'integer') {
+      out.note = '只允许整数';
+    }
+    return out;
+  }
+
+  /* ---------------- 对外主接口 ---------------- */
+  function prepareSolve(n, givenMap, domainInfo) {
+    const model = buildModel(n);
+    const N = model.N, SC = model.SC;
+    const givensAll = new Map(givenMap);
+    if (domainInfo && domainInfo.S) givensAll.set(SC, domainInfo.S);
+
     const rows = model.lineRows.map(function (r) { const s = r.slice(); s.push(F0); return s; });
-    for (const e of givenMap) {
+    for (const e of givensAll) {
       const r = new Array(N + 1).fill(F0); r[e[0]] = F1; r.push(e[1]);
       rows.push(r);
     }
@@ -867,25 +1224,73 @@
       return { error: '已知数之间互相矛盾：不存在同时让所有行、列、对角线之和相等的填法。请检查输入的数字。' };
     }
     const drows = model.lineRows.map(function (r) { return r.slice(); });
-    for (const c of givenMap.keys()) { const r = new Array(N + 1).fill(F0); r[c] = F1; drows.push(r); }
+    for (const c of givensAll.keys()) { const r = new Array(N + 1).fill(F0); r[c] = F1; drows.push(r); }
     const D = nullSpaceRows(drows, N + 1);
     const determined = [];
     for (let c = 0; c <= N; c++) if (D.every(function (d) { return d[c].isZero(); })) determined.push(c);
     const valueOf = new Map(determined.map(function (c) { return [c, part[c]]; }));
-    return { model: model, part: part, D: D, determined: determined, valueOf: valueOf };
+    return { model: model, part: part, D: D, determined: determined, valueOf: valueOf, givensAll: givensAll };
   }
 
-  function assembleResult(n, givenMap, prep, ded) {
+  function assembleResult(n, givenMap, prep, ded, opts) {
     const model = prep.model, N = model.N, SC = model.SC;
     const D = prep.D, determined = prep.determined, part = prep.part;
-    const known = ded.known;
+    const domainInfo = (opts && opts.domainInfo) || null;
+    const csp = (opts && opts.csp) || null;
+    const integerInfo = (opts && opts.integerInfo) || null;
 
-    const complete = determined.filter(function (c) { return c !== SC; }).length === N;
+    const known = ded.known;
     const sampling = sampleCompletions(model, part, D, determined, givenMap);
+
+    // 由值域限定直接得到的幻和（第 1 步，无前提）
+    const steps = [];
+    const knownEntries = ded.knownEntries.slice();
+    if (domainInfo && domainInfo.S) {
+      steps.push({
+        i: 1, special: 'domain-S', isS: true, label: 'S', cell: null, target: SC,
+        value: domainInfo.S, valueStr: fmtNumber(domainInfo.S),
+        d: 0, premises: [], identity: null, theorem: null, refStep: null,
+        domainKind: domainInfo.kind, domainNote: domainInfo.note,
+        totalStr: domainInfo.total ? fmtNumber(domainInfo.total) : null,
+        involvedCells: Array.from({ length: N }, function (_, i) { return i; }),
+        snapshot: knownEntries.map(function (e) { return { coord: e.coord, valueStr: fmtNumber(known.get(e.coord)), source: e.source }; })
+      });
+    }
+    for (const st of ded.steps) steps.push(st);
+
+    // 有限值域穷举带来的额外可定格（线性无法证明、但穷尽搜索可证明）
+    let extraDetermined = [];
+    if (csp && csp.ok && csp.exhaustive && csp.allSolutionsFirst) {
+      const extras = [];
+      for (const c of csp.stableCells) { if (!known.has(c)) extras.push(c); }
+      if (extras.length > 0) {
+        const stepIdx = steps.length + 1;
+        for (const c of extras) {
+          known.set(c, parseNumberString(csp.allSolutionsFirst[c]));
+          knownEntries.push({ coord: c, source: stepIdx });
+        }
+        steps.push({
+          i: stepIdx, special: 'csp', isS: false, label: '穷举', cell: null, target: null,
+          valueStr: null, d: 0, premises: [], identity: null, theorem: null, refStep: null,
+          involvedCells: extras.slice(),
+          cspInfo: {
+            exhaustive: true, count: csp.count,
+            extras: extras.map(function (c) { return { coord: c, label: model.letters[c], valueStr: csp.allSolutionsFirst[c] }; }),
+            samples: csp.samples
+          },
+          snapshot: knownEntries.map(function (e) { return { coord: e.coord, valueStr: fmtNumber(known.get(e.coord)), source: e.source }; })
+        });
+        extraDetermined = extras;
+      }
+    }
+
+    const finalCells = new Array(N).fill(null);
+    for (const e of knownEntries) if (e.coord !== SC) finalCells[e.coord] = { valueStr: fmtNumber(known.get(e.coord)), source: e.source };
+
+    const complete = finalCells.every(function (c) { return c !== null; });
     const undeterminedCells = [];
     for (let c = 0; c < N; c++) if (!known.has(c)) undeterminedCells.push(c);
 
-    // 未定时的两个反例填法
     let examples = null;
     if (!complete && D.length > 0 && givenMap.size > 0) {
       let dir = D.find(function (d) { return undeterminedCells.some(function (c) { return !d[c].isZero(); }); });
@@ -895,7 +1300,6 @@
       });
     }
 
-    // 完整时的验证表
     let verification = null;
     const Sval = known.has(SC) ? known.get(SC) : null;
     if (complete && Sval !== null) {
@@ -910,9 +1314,6 @@
       };
     }
 
-    const finalCells = new Array(N).fill(null);
-    for (const e of ded.knownEntries) if (e.coord !== SC) finalCells[e.coord] = { valueStr: fmtNumber(known.get(e.coord)), source: e.source };
-
     const givenList = Array.from(givenMap).map(function (e) {
       return { coord: e[0], label: model.letters[e[0]], valueStr: fmtNumber(e[1]), r: Math.floor(e[0] / n) + 1, c: e[0] % n + 1 };
     }).sort(function (a, b) { return a.coord - b.coord; });
@@ -920,10 +1321,13 @@
     return {
       ok: true,
       n: n, N: N,
-      model: { n: n, N: N, SC: SC, m: model.m, letters: model.letters, lines: model.lines.map(function (L) { return { name: L.name, cells: L.cells }; }) },
+      model: {
+        n: n, N: N, SC: SC, m: model.m, letters: model.letters,
+        lines: model.lines.map(function (L) { return { name: L.name, cells: L.cells }; })
+      },
       givens: givenList,
-      steps: ded.steps,
-      knownEntries: ded.knownEntries,
+      steps: steps,
+      knownEntries: knownEntries,
       finalCells: finalCells,
       S: Sval === null ? null : { valueStr: fmtNumber(Sval), source: (ded.sourceMap.get(SC) == null ? null : ded.sourceMap.get(SC)) },
       complete: complete,
@@ -933,25 +1337,61 @@
       examples: examples,
       sampling: sampling,
       verification: verification,
+      domain: domainInfo ? {
+        kind: domainInfo.kind, note: domainInfo.note,
+        S: domainInfo.S ? fmtNumber(domainInfo.S) : null,
+        total: domainInfo.total ? fmtNumber(domainInfo.total) : null
+      } : null,
+      csp: csp ? {
+        ok: csp.ok, error: csp.error, exhaustive: csp.exhaustive, count: csp.count,
+        samples: csp.samples, stableCells: csp.stableCells, refutedCells: csp.refutedCells,
+        extras: extraDetermined
+      } : null,
+      integer: integerInfo,
       error: null
     };
   }
 
   /**
-   * solveMagic(n, givenMap)  givenMap: Map<格子下标 0..n²-1, Frac>
+   * solveMagic(n, givenMap, opts)
+   *   opts.domain = { kind:'none'|'integer'|'classic'|'set', values:[Frac] }
    * 同步求解；返回 {ok:false, error} 或完整求解结果（含分步证明数据）。
    */
-  function solveMagic(n, givenMap) {
-    const prep = prepareSolve(n, givenMap);
+  function solveMagic(n, givenMap, opts) {
+    opts = opts || {};
+    const domainInfo = buildDomain(n, opts.domain, givenMap);
+    if (domainInfo.error) return { ok: false, n: n, error: domainInfo.error };
+
+    const prep = prepareSolve(n, givenMap, domainInfo);
     if (prep.error) return { ok: false, n: n, error: prep.error };
-    const ded = deduceSteps(prep.model, givenMap, new Set(prep.determined), prep.valueOf);
-    return assembleResult(n, givenMap, prep, ded);
+
+    let csp = null;
+    if (domainInfo.distinct) {
+      // n≥5 的穷举规模过大（5 阶全解数量极多），只做线性推导；3、4 阶可穷尽
+      if (n <= 4) {
+        const lim = opts.cspLimits || (n <= 3
+          ? { maxSolutions: 200, maxNodes: 160000, maxMs: 900 }
+          : { maxSolutions: 1000, maxNodes: 400000, maxMs: 1500 });
+        csp = solveCSP(prep.model, prep.givensAll, domainInfo.multiset, domainInfo.S, lim);
+        if (csp.error) return { ok: false, n: n, error: csp.error };
+      }
+    }
+    let integerInfo = null;
+    if (domainInfo.kind === 'integer') {
+      integerInfo = checkIntegerSolutions(prep);
+      if (integerInfo.feasible === false) return { ok: false, n: n, error: integerInfo.reason };
+    }
+
+    const ded = deduceSteps(prep.model, prep.givensAll, new Set(prep.determined), prep.valueOf, {
+      baseIndex: domainInfo.S ? 2 : 1,
+      labels: domainInfo.labels
+    });
+    return assembleResult(n, givenMap, prep, ded, { domainInfo: domainInfo, csp: csp, integerInfo: integerInfo });
   }
 
   /**
-   * solveMagicAsync(n, givenMap, opts) —— 协作式异步求解（默认走此路径）。
-   * 各阶段之间、以及推导循环中每连续工作 budgetMs（默认 12ms）就让出主线程一次，
-   * 保证页面始终响应。onProgress({pending}) 可用于进度提示。
+   * solveMagicAsync(n, givenMap, opts) —— 协作式异步求解（页面默认走此路径）。
+   * 各阶段之间、以及推导循环中每连续工作 budgetMs（默认 12ms）就让出主线程一次。
    */
   function sleep0() { return new Promise(function (rs) { setTimeout(rs, 0); }); }
   async function solveMagicAsync(n, givenMap, opts) {
@@ -959,31 +1399,36 @@
     const budget = opts.budgetMs || 12;
     const onProgress = opts.onProgress || null;
 
-    const model = buildModel(n);
-    const N = model.N, SC = model.SC;
+    const domainInfo = buildDomain(n, opts.domain, givenMap);
+    if (domainInfo.error) return { ok: false, n: n, error: domainInfo.error };
     await sleep0();
 
-    const rows = model.lineRows.map(function (r) { const s = r.slice(); s.push(F0); return s; });
-    for (const e of givenMap) {
-      const r = new Array(N + 1).fill(F0); r[e[0]] = F1; r.push(e[1]);
-      rows.push(r);
+    const prep = prepareSolve(n, givenMap, domainInfo);
+    if (prep.error) return { ok: false, n: n, error: prep.error };
+    await sleep0();
+
+    let csp = null;
+    if (domainInfo.distinct && n <= 4) {
+      if (onProgress) { try { onProgress({ phase: 'csp' }); } catch (e) { } }
+      await sleep0();
+      const lim = opts.cspLimits || (n <= 3
+        ? { maxSolutions: 200, maxNodes: 160000, maxMs: 900 }
+        : { maxSolutions: 1000, maxNodes: 400000, maxMs: 1500 });
+      csp = solveCSP(prep.model, prep.givensAll, domainInfo.multiset, domainInfo.S, lim);
+      if (csp.error) return { ok: false, n: n, error: csp.error };
+      await sleep0();
     }
-    const part = solveAug(rows, N + 1);
-    if (part === null) {
-      return { ok: false, n: n, error: '已知数之间互相矛盾：不存在同时让所有行、列、对角线之和相等的填法。请检查输入的数字。' };
+    let integerInfo = null;
+    if (domainInfo.kind === 'integer') {
+      integerInfo = checkIntegerSolutions(prep);
+      if (integerInfo.feasible === false) return { ok: false, n: n, error: integerInfo.reason };
+      await sleep0();
     }
-    await sleep0();
 
-    const drows = model.lineRows.map(function (r) { return r.slice(); });
-    for (const c of givenMap.keys()) { const r = new Array(N + 1).fill(F0); r[c] = F1; drows.push(r); }
-    const D = nullSpaceRows(drows, N + 1);
-    const determined = [];
-    for (let c = 0; c <= N; c++) if (D.every(function (d) { return d[c].isZero(); })) determined.push(c);
-    const valueOf = new Map(determined.map(function (c) { return [c, part[c]]; }));
-    await sleep0();
-
-    const prep = { model: model, part: part, D: D, determined: determined, valueOf: valueOf };
-    const gen = deduceStepsGen(model, givenMap, new Set(determined), valueOf);
+    const gen = deduceStepsGen(prep.model, prep.givensAll, new Set(prep.determined), prep.valueOf, {
+      baseIndex: domainInfo.S ? 2 : 1,
+      labels: domainInfo.labels
+    });
     let ded = null;
     let t0 = Date.now();
     while (true) {
@@ -995,8 +1440,7 @@
         t0 = Date.now();
       }
     }
-    const result = assembleResult(n, givenMap, prep, ded);
-    return result;
+    return assembleResult(n, givenMap, prep, ded, { domainInfo: domainInfo, csp: csp, integerInfo: integerInfo });
   }
 
   /** 供随机出题：给定坐标集合（不看数值），返回可确定的坐标集合 */
@@ -1141,8 +1585,66 @@
 
   function sSrc(sourceIdx) { return sourceIdx == null ? '题设' : '第' + sourceIdx + '步'; }
 
+  /* ---- 值域限定：直接得到幻和（第 1 步） ---- */
+  function domainSBlocks(result, step) {
+    const model = result.model, n = result.n, N = result.N;
+    const bl = [];
+    bl.push(H2('第 1 步　直接得到 幻和 S = ' + step.valueStr + '（由「' + step.domainNote + '」）'));
+    bl.push(P(B('结论：'), S('由题设「' + step.domainNote + '」可知全部 ' + N + ' 个数之和为 '), B(step.totalStr),
+      S('；而 ' + n + ' 条行线恰好把所有格子各算一次，它们的和是 ' + n + '·S。于是 ' + n + '·S = ' + step.totalStr + '，即 '), B('S = ' + step.valueStr), S(' —— 不需要任何已知格子。')));
+    bl.push(P(S('（这就是为什么限定「1…n²」时证明会短很多：幻和一开始就知道，后面每一步都能直接用幻和。）', { cls: 'dim' })));
+
+    // 证明：画块（整格红 = 行线覆盖范围）
+    const proofBlocks = [];
+    proofBlocks.push(P(S('把 ' + n + ' 条行线全部加起来（下图红色就是它们的覆盖范围，正好是整个方阵）：')));
+    const cells = [];
+    for (let i = 0; i < N; i++) cells.push({ text: model.letters[i], kind: 'red' });
+    proofBlocks.push(GRID(n, cells, [S('红色：' + n + ' 条行线覆盖全部 ' + N + ' 格（每格恰好一次）', { cls: 'err', b: 1 })]));
+    proofBlocks.push(P(S('左边 = 全部数字之和 = 1 + 2 + … + ' + N + ' = '), B(step.totalStr),
+      S('（' + step.domainNote + '）；右边 = ' + n + ' 条线各等于 S，共 ' + n + '·S。所以 ' + n + '·S = ' + step.totalStr + '，两边除以 ' + n + ' 得 '), B('S = ' + step.valueStr), S('。∎')));
+    bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: proofBlocks });
+
+    bl.push(H3('运用（后续步骤可直接使用）'));
+    bl.push(P(B('运用：'), S('S = ' + step.valueStr + ' 已知。后面凡是一条线上已知 ' + (n - 1) + ' 个数，就能用「S − 其余数」直接出数；证明中也会优先使用幻和。')));
+    bl.push(H3('填入后的示意图'));
+    bl.push(stateGrid(model, step.snapshot, -1, [S('幻和 S = ' + step.valueStr + '（已知），灰色字母 = 尚未确定的格子。')]));
+    return bl;
+  }
+
+  /* ---- 值域限定：穷举验证（末步） ---- */
+  function cspBlocks(result, step) {
+    const model = result.model, n = result.n;
+    const info = step.cspInfo;
+    const bl = [];
+    bl.push(H2('第 ' + step.i + ' 步　穷举验证：在限定数字范围内所有合法填法都相同'));
+    const names = info.extras.map(function (e) { return e.label + ' = ' + e.valueStr; }).join('，');
+    bl.push(P(B('结论：'), S('在「' + (result.domain ? result.domain.note : '限定数字') + '」的全部合法填法中，'), B(names),
+      S(' —— 这几个格子在**所有**填法里都取同一个值，所以它们也是确定的（自动填入）。')));
+    const proofBlocks = [];
+    proofBlocks.push(P(S('做法：把限定范围内的数字各用一次，逐个格子试填，并始终要求每条行、列、对角线的和都等于 S = ' +
+      (result.domain && result.domain.S ? result.domain.S : '?') + '。对所有分支穷尽搜索后，共得到 '), B(info.count + ' 种'), S('合法填法（没有遗漏）。')));
+    proofBlocks.push(P(S('既然每种合法填法里这些格子都等于同一个数，那么把它们填成别的数就**无解**——它们就是确定解。这就是“为什么某个格子能确定”的完整证明。')));
+    if (info.samples && info.samples.length > 0) {
+      proofBlocks.push(P(S('下面是穷举得到的若干种填法（可以看到这些格子在各填法中都相同）：')));
+      for (let q = 0; q < info.samples.length; q++) {
+        const cells = info.samples[q].map(function (t, idx) {
+          const isGiv = result.givens.some(function (g) { return g.coord === idx; });
+          const isExtra = info.extras.some(function (e) { return e.coord === idx; });
+          return { text: t, kind: isGiv ? 'given' : (isExtra ? 'new' : 'derived') };
+        });
+        proofBlocks.push(GRID(n, cells, [S('合法填法 ' + (q + 1) + ' / ' + info.count)]));
+      }
+    }
+    bl.push({ t: 'proof', title: n + ' 阶幻方', blocks: proofBlocks });
+    bl.push(H3('填入后的示意图'));
+    bl.push(stateGrid(model, step.snapshot, -1, [S('绿色/黄色 = 已确定（含穷举确定），灰色字母 = 在限定下仍可变化。')]));
+    return bl;
+  }
+
   /* ---- 单步页面 ---- */
   function stepBlocks(result, step) {
+    if (step.special === 'domain-S') return domainSBlocks(result, step);
+    if (step.special === 'csp') return cspBlocks(result, step);
     const model = result.model, n = result.n;
     const bl = [];
     bl.push(H2('第 ' + step.i + ' 步　确定 ' + (step.isS ? '幻和 S' : '格子 ' + step.label + '（第' + step.cell.r + '行第' + step.cell.c + '列）') + ' = ' + step.valueStr));
@@ -1309,6 +1811,58 @@
           });
           bl.push(GRID(n, cells, [S('填法' + '一二'.charAt(i) + '（幻和 S = ' + ex.S + '）')]));
         }
+      }
+    }
+
+    // 值域限定说明
+    if (result.domain && result.domain.kind !== 'none') {
+      bl.push(H3('值域限定：「' + result.domain.note + '」'));
+      if (result.domain.S) {
+        bl.push(P(S('由限定「' + result.domain.note + '」，全部数字之和 = ' + result.domain.total + '，' + n + ' 条行线恰好覆盖全部格子一次，所以 ' + n + '·S = ' + result.domain.total + '，即 '), B('S = ' + result.domain.S), S('（第 1 步已证）。此后每一步都能直接使用幻和。')));
+      } else if (result.domain.kind === 'integer') {
+        bl.push(P(S('限定“只允许整数”：解出的每个数都必须是整数。程序会检查所有可确定的数是否都是整数，并尝试构造一组整数填法作为存在性见证。')));
+      }
+    }
+    if (result.integer) {
+      if (result.integer.feasible === true) {
+        bl.push(P(S('整数解存在性：已找到一组全部为整数的填法 ✓（例如 S = ' + result.integer.S + '）。')));
+      } else if (result.integer.reason) {
+        bl.push(P(S(result.integer.reason, { cls: 'err' })));
+      }
+    }
+
+    // 穷举验证（有限值域）
+    if (result.csp && result.csp.ok) {
+      bl.push(H3('穷举验证（在限定数字范围内枚举所有合法填法）'));
+      if (result.csp.exhaustive) {
+        bl.push(P(S('共穷尽得到 '), B(result.csp.count + ' 种'), S('合法填法（无遗漏）。')));
+        if (result.csp.count === 1) {
+          bl.push(P(S('只有一种填法 ⇒ 所有格子都被唯一确定，这就是唯一的解。')));
+        } else {
+          const extra = result.csp.extras || [];
+          const stableSet = new Set(result.csp.stableCells || []);
+          const stableNames = [];
+          for (const c of stableSet) {
+            const e = result.knownEntries.find(function (x) { return x.coord === c; });
+            if (e && c !== result.model.SC) stableNames.push(result.model.letters[c]);
+          }
+          bl.push(P(S('在这 ' + result.csp.count + ' 种填法里，'), B(stableNames.length ? stableNames.join('、') : '（没有）'),
+            S(' 每次都取相同的值——所以它们是确定解（填别的数就无解）；其余格子在不同填法里会变，说明现有已知数定不住它们。')));
+          if (extra.length > 0) {
+            bl.push(P(S('其中 ' + extra.map(function (c) { return result.model.letters[c]; }).join('、') + ' 是线性推导推不出、但穷举能确定的（已作为最后一步自动填入）。')));
+          }
+          if (result.csp.samples && result.csp.samples.length > 1) {
+            for (let q = 0; q < Math.min(2, result.csp.samples.length); q++) {
+              const cells = result.csp.samples[q].map(function (t, idx) {
+                const isGiv = result.givens.some(function (g) { return g.coord === idx; });
+                return { text: t, kind: isGiv ? 'given' : (stableSet.has(idx) ? 'derived' : 'diff') };
+              });
+              bl.push(GRID(n, cells, [S('合法填法示例 ' + (q + 1) + ' / ' + result.csp.count)]));
+            }
+          }
+        }
+      } else {
+        bl.push(P(S('搜索达到计算上限（已找到 ' + result.csp.count + ' 种合法填法，但未穷尽），因此只采用线性可严格证明的结论；未穷尽的搜索不能作为“确定”的依据。', { cls: 'dim' })));
       }
     }
 
@@ -1923,6 +2477,41 @@
     setGrid(vals);
   });
 
+  /* ---------------- 值域限定 ---------------- */
+  function currentDomain() {
+    const kind = $('selDomain').value;
+    if (kind === 'classic') return { kind: 'classic' };
+    if (kind === 'integer') return { kind: 'integer' };
+    if (kind === 'set') {
+      const raw = $('customSet').value.trim();
+      const toks = raw.split(/[\s,，;；]+/).filter(function (x) { return x !== ''; });
+      const vals = [];
+      for (const t of toks) {
+        try { vals.push(MagicCore.parseNumberString(t)); }
+        catch (e) { return { kind: 'set', error: '限定数字里有无法识别的数："' + t + '"' }; }
+      }
+      return { kind: 'set', values: vals };
+    }
+    return { kind: 'none' };
+  }
+  function syncDomainUI() {
+    const kind = $('selDomain').value;
+    $('setBox').style.display = kind === 'set' ? '' : 'none';
+    const n = state.n;
+    if (kind === 'set') {
+      $('setHint').textContent = '需要恰好 n² = ' + (n * n) + ' 个数（每个用一次）；可用分数/负数，如 -3 0.5 2/3 …';
+    }
+    if (kind === 'classic') {
+      $('customSet').value = Array.from({ length: n * n }, function (_, i) { return String(i + 1); }).join(' ');
+    }
+  }
+  $('selDomain').addEventListener('change', function () {
+    syncDomainUI();
+    scheduleAuto(0);
+  });
+  $('btnSetApply').addEventListener('click', function () { scheduleAuto(0); });
+  $('customSet').addEventListener('input', function () { scheduleAuto(); });
+
   /* ---------------- 求解 ---------------- */
   async function solve(opts) {
     opts = opts || {};
@@ -1931,6 +2520,8 @@
     const tok = state.token;
 
     const n = state.n;
+    const dom = currentDomain();
+    if (dom.error) { $('inputErr').textContent = dom.error; return; }
     const given = new Map();
     const errs = [];
     $('gridBox').querySelectorAll('input').forEach(function (inp) {
@@ -1953,7 +2544,10 @@
     btn.disabled = true; btn.textContent = '求解中…';
     try {
       const result = await MagicCore.solveMagicAsync(n, given, {
-        onProgress: function (p) { btn.textContent = '求解中…（剩 ' + p.pending + ' 个待定）'; }
+        domain: dom,
+        onProgress: function (p) {
+          btn.textContent = p.phase === 'csp' ? '求解中…（穷举限定范围）' : ('求解中…' + (p.pending ? '（剩 ' + p.pending + ' 个待定）' : ''));
+        }
       });
       if (tok !== state.token) { btn.disabled = false; btn.textContent = '求 解'; return; }
       btn.disabled = false; btn.textContent = '求 解';
@@ -2017,6 +2611,13 @@
         result.undeterminedCells.length + ' 格在现有已知下无法唯一确定（剩 ' + result.dimFree + ' 个自由参数）。';
     }
     html += result.S ? '　幻和 S = <b>' + result.S.valueStr + '</b>。' : '　幻和 S 尚未确定。';
+    if (result.domain && result.domain.kind !== 'none') {
+      html += '　限定：<b>' + result.domain.note + '</b>';
+      if (result.csp && result.csp.ok && result.csp.exhaustive) {
+        html += '；限定范围内共 <b>' + result.csp.count + '</b> 种合法填法（已穷尽）';
+      }
+    }
+    if (result.integer && result.integer.feasible === true) html += '；已找到整数填法 ✓';
     html += '<br><span class="dim">点 <b>“求 解”</b> 查看逐步最简证明（含字母推导与画块示意，证明默认折叠）；双击绿色数字可查看它的推导依据。</span>';
     bar.innerHTML = html;
     bar.style.display = '';
@@ -2241,6 +2842,7 @@
 
   /* ---------------- 初始化 ---------------- */
   buildInputs(3);
+  syncDomainUI();
   updateUndoButtons();
 })();
 
