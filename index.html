@@ -40,6 +40,10 @@
   table.inp td i { position: absolute; left: 4px; top: 1px; font-size: 10px; color: #9aa3af; font-style: normal; pointer-events: none; }
   table.inp.small { --inp-cell: 2.5em; }
   table.inp.small input { font-size: 13px; }
+  /* 自动推出的数（回填到填写框）：绿色斜体 + 填充闪光 */
+  table.inp input.derived-val { color: var(--derived); background: #ecf6ef; font-style: italic; font-weight: 600; }
+  table.inp input.just-filled { box-shadow: 0 0 0 3px #a8dab6; }
+  table.inp input.derived-val::placeholder { color: #b7c9bd; }
 
   .hint { font-size: 12.5px; color: var(--dim); }
   .errbox { color: var(--err); font-size: 13.5px; white-space: pre-line; margin-top: 6px; }
@@ -105,6 +109,21 @@
   .modal .modal-close { position: absolute; right: 10px; top: 8px; width: 32px; height: 32px; padding: 0; font-size: 17px; line-height: 1; border-radius: 50%; }
   .modal .blk-h2 { display: none; }   /* 步骤标题已在弹窗标题中呈现 */
 
+
+  /* ---------- 证明折叠 ---------- */
+  details.proof-details { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; padding: 0 12px; background: #fcfdfe; }
+  details.proof-details > summary { cursor: pointer; font-weight: 700; color: #1d2f52; padding: 8px 0; user-select: none; }
+  details.proof-details[open] > summary { border-bottom: 1px dashed var(--line); margin-bottom: 6px; }
+  details.proof-details .proof-body { padding: 2px 2px 10px; }
+
+  /* ---------- 画块证明：红/蓝区域 ---------- */
+  table.ms td.k-red { background: #fdeaea; color: #b00020; font-weight: 800; outline: 2px solid #e6a4a4; outline-offset: -2px; font-style: italic; }
+  table.ms td.k-blue { background: #e9f1fd; color: #0b5cad; font-weight: 800; outline: 2px solid #a9c6ee; outline-offset: -2px; font-style: italic; }
+
+  /* ---------- 快速出数状态条 ---------- */
+  #quickBar { background: #fff; border: 1px solid #bfe3c8; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14.5px; }
+  #quickBar .dim { color: var(--dim); font-size: 13px; }
+
   /* ---------- 打印 ---------- */
   @media print {
     body { background: #fff; }
@@ -115,6 +134,8 @@
     .page.pg-hidden { display: block !important; }
     .blk-h2, .blk-h3 { page-break-after: avoid; }
     table.ms, table.data { page-break-inside: avoid; }
+    details.proof-details > summary { display: none; }
+    details.proof-details { border: none; padding: 0; }
   }
 </style>
 </head>
@@ -135,6 +156,8 @@
         </select>
       </label>
       <label class="chk" title="每填入/修改一个数字后自动重新出数"><input type="checkbox" id="autoSolve" checked> 输入即自动出数</label>
+      <button class="ghost" id="btnUndo" title="Ctrl+Z">↩ 撤回</button>
+      <button class="ghost" id="btnRedo" title="Ctrl+Y">↪ 重做</button>
       <button class="ghost" id="btnBatchToggle">批量填入…</button>
       <button class="ghost" id="btnClear">清空</button>
       <span style="flex:1"></span>
@@ -145,7 +168,7 @@
       <textarea id="batchText" rows="4" placeholder="按行粘贴数字，空格/逗号分隔，空缺用 - 或 . 表示，例如：&#10;2 7 -&#10;- 5 -&#10;- - 9"></textarea>
       <div style="margin-top:4px;"><button class="ghost" id="btnBatchApply">应用到表格</button></div>
     </div>
-    <div class="hint" style="margin-top:6px;">每个格子可填：整数（如 <code>12</code>）、最简或非最简分数（如 <code>1/2</code>、<code>10/4</code>）、小数（如 <code>0.75</code>）、甚至 <code>1.5/2</code>；留空 = 未知。输出时自动选用有效数字更少的表示（平手取最简分数），分数在图中以上下分式呈现。</div>
+    <div class="hint" style="margin-top:6px;">每个格子可填：整数（如 <code>12</code>）、分数（如 <code>1/2</code>、<code>10/4</code>）、小数（如 <code>0.75</code>）、甚至 <code>1.5/2</code>；留空 = 未知。<b>能确定的数会自动回填到填写框</b>（绿色斜体 = 自动推出，直接输入可把它改成已知数，双击可查看证明）；黑色 = 你输入的已知数。<b>↩ 撤回 / ↪ 重做</b>（Ctrl+Z / Ctrl+Y）可回退任何填写操作。输出自动选有效数字更少的表示（平手取最简分数），图中分数以上下分式呈现。</div>
     <div class="hint" style="margin-top:4px;">示例：</div>
     <div class="controls" style="margin-top:2px;">
       <button class="ghost" data-preset="two">三阶·两数定一格</button>
@@ -159,7 +182,8 @@
   </section>
 
   <section id="result">
-    <div class="toolbar no-print">
+    <div id="quickBar" style="display:none" class="no-print"></div>
+    <div class="toolbar no-print" id="toolbar">
       <button class="ghost" id="btnPrev">◀ 上一步</button>
       <span class="pginfo" id="pgInfo">1 / 1</span>
       <button id="btnNext">下一步 ▶</button>
@@ -168,6 +192,7 @@
         <option value="step">分步模式（每页一步）</option>
         <option value="all">一页显示全部证明</option>
       </select>
+      <button class="ghost" id="btnProofs">📖 展开全部证明</button>
       <button class="ghost" id="btnPrint">🖨 打印 / 导出 PDF</button>
       <button class="ghost" id="btnDocx">📄 导出 DOCX</button>
     </div>
@@ -176,9 +201,9 @@
   </section>
 </div>
 
-<script src="magic-core.js?v=17"></script>
-<script src="render.js?v=17"></script>
-<script src="docx.js?v=17"></script>
-<script src="app.js?v=17"></script>
+<script src="magic-core.js?v=19"></script>
+<script src="render.js?v=19"></script>
+<script src="docx.js?v=19"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>
