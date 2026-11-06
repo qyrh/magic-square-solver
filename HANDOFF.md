@@ -4,14 +4,16 @@
 > 目录：`D:\glm-db\.zcode\workspace\draft-85724259-c664-4d90-9290-644bc2e3e3dc\magic-square-solver\`
 > 仓库：https://github.com/qyrh/magic-square-solver 　在线：https://qyrh.github.io/magic-square-solver/
 > 单文件：`dist/幻方求解器.html`（由 `node build.js` 生成）
-> 最后更新：2026-11-06（第 5 轮：去掉 1/2 阶、分数全立体、证明改“重合抵消”讲法、系数优先为 1）
+> 最后更新：2026-11-06（第 7 轮：示例两字折叠+点击写入、删首页说明页+“?”帮助弹窗、
+> 全阶×全模式穷尽验证 verify-all.js、修 n≥5 限定模式超范围漏校验；index.html ?v=23）
 
 ## 0. 一分钟上手
 
 ```bash
 cd magic-square-solver
-node test-core.js     # 86 项断言（必须全过）
+node test-core.js     # 198 项断言（必须全过；含 3–8 阶 × 4 值域矩阵冒烟）
 node test-docx.js     # 文档块 + DOCX 结构自检
+node verify-all.js    # 全阶数(3–8)×全模式(4种)穷尽验证：177 例 + DOCX 6 个 Python 校验
 node build.js         # 生成 dist/幻方求解器.html 单文件版（会自检无外链脚本）
 # 浏览器：双击 dist/幻方求解器.html 或 index.html
 ```
@@ -122,7 +124,8 @@ python -X utf8 - <<'EOF'
 import base64, subprocess, json, urllib.parse
 REPO='qyrh/magic-square-solver'
 files=['index.html','magic-core.js','render.js','docx.js','app.js','build.js',
-       'test-core.js','test-docx.js','README.md','PROJECT-BRIEF.md','HANDOFF.md',
+       'test-core.js','test-docx.js','verify-all.js','verify_docx_check.py','gen-canned.js','.gitignore',
+       'README.md','PROJECT-BRIEF.md','HANDOFF.md',
        'dist/幻方求解器.html','dist/README.md']
 for f in files:
     with open(f,'rb') as fp: content=base64.b64encode(fp.read()).decode()
@@ -155,12 +158,17 @@ gh api repos/qyrh/magic-square-solver/pages/builds/latest -q '.status'
 
 ## 8. 测试覆盖现状
 
-- `test-core.js`：86 项——分数解析/显示、三阶两数、洛书顺序（对顶→幻和→补线）、分数混合、
+- `test-core.js`：**198 项**——分数解析/显示、三阶两数、洛书顺序（对顶→幻和→补线）、分数混合、
   矛盾、丢勒四阶、四角定和、一/二阶、空输入、五阶一致性、全填满、
-  **值域限定**（classic 幻和直得/唯一解/非法角无解/重复数字报错、integer 无解与见证、set 数量校验）。
-- `test-docx.js`：文档块结构（含证明折叠块）、DOCX zip/OOXML 合法、立体分数分数线、正方形行高。
-- 浏览器：域下拉/自定义集合显隐、自动出数回填、撤回重做、快速/完整切换、证明折叠、
-  红蓝画块、点击弹窗、随机试解段落、DOCX 真实下载。
+  **值域限定**（classic 幻和直得/唯一解/非法角无解/重复数字报错、integer 无解与见证、set 数量校验）、
+  **矩阵冒烟**（3–8 阶 × 4 值域：步号对齐/填格完整/第 1 步 domain-S/integer 见证与全整数示例/
+  任意阶超范围拒绝）。
+- `test-docx.js`：文档块结构（页数=步数+1、第一页即第 1 步、examples 折叠块、证明折叠块）、
+  DOCX zip/OOXML 合法、立体分数分数线、正方形行高。
+- `verify-all.js`：**全阶×全模式穷尽矩阵 177 例**（见 §8.7 第 4 条）+ 每阶数 DOCX 的
+  Python zipfile/良构校验。
+- 浏览器 E2E（罐头结果）：帮助弹窗、自动出数回填、撤回重做、快速/完整切换、证明折叠、
+  红蓝画块、点击弹窗、**示例胶囊折叠/展开/写入/撤回/收起**、立体分数、DOCX、单文件无外链。
 
 ## 8.5 第 5 轮改动（务必保持）
 
@@ -193,6 +201,50 @@ gh api repos/qyrh/magic-square-solver/pages/builds/latest -q '.status'
 4. **回归测试**：`test-core.js` 新增 6 项（示例全整数、大数已知仍可判定、仅 1 已知数示例仍整数），
    共 92 项；另做了 252 例“补线法/整线求 S”构造恒等式的穷尽数值校验与 180 例填格完整性检查（缺口 0）。
 5. 若再改整数模式：**不要**用 `part + D·t` 直接当示例（会出分数）；必须用 `intDirs`。
+
+## 8.7 第 7 轮改动（示例折叠 + 删首页说明 + 全矩阵验证，2026-11-06）
+
+1. **任务 A：示例区“两字折叠 + 点击查看 + 再点击写入”**
+   - 新文档块 `{t:'examples', n, items:[{label:'示例 k', note, values:[str], grid}]}`（`render.js: examplesBlock()`）。
+     总结页原来铺开的四类示例（`examples` 两种填法、整数填法示例、随机试解 3 组、穷举合法填法）
+     全部收进这一个块；配套解释长段落已删（保留一行 dim 交叉验证说明）。
+   - 网页 `app.js: renderBlock('examples')`：默认只有“示例”两字胶囊（title 有提示）；
+     点击展开条目列表（`示例 k：1 10 4 / 8 5 2 / 6 0 9`，只列数值）；点击条目 =
+     `pushHistory()` + `setGrid(values)` 写入填写区（黑色已知数、可 Ctrl+Z）；再点（此时显示“收起”）折叠；
+     只 toggle 显隐，**不改 state.current、不重渲染**，分页位置不动。
+   - 打印 CSS 强制 `.ex-list{display:block!important}`（打印完整展开）；DOCX `docx.js: renderBlocks('examples')`
+     **完整展开**逐条 `gridXml`（文档要完整）。写入时若阶数已变（values.length ≠ 格子数）直接忽略。
+   - 完整解（无任何示例）不出胶囊。
+2. **任务 B：删首页说明页 + “?”帮助弹窗**
+   - `render.js: buildDocument()` 删除 `introBlocks()`（函数已移除）：**第一页即“第 1 步”**，
+     总结页仍在最后；错误页保留。页数 = 步数 + 1（原来是 +2）。
+   - 原首页内容精简后移入 `app.js: openHelpModal()`（`.modal-mask no-print`，✕/点遮罩/Esc 关闭）：
+     怎么用（5 条）、**当前 n 的完整字母表**（lettersFor(state.n)，n≤5 为 a–y，n≥6 为 rXcY，与
+     magic-core `buildModel` 的 letters 完全一致）、思路一段、值域限定四选一。
+   - "?"按钮两处：输入卡控制栏最右（“求 解”旁）+ 结果工具栏最右；`index.html ?v=23`。
+   - 帮助内容不进 pages，打印/DOCX 天然无残留。
+3. **修复（矩阵发现）**：classic/set 模式已知数不在限定集合时，n≥5 因跳过 CSP 而**漏校验**
+   （n≤4 由 CSP 兜住）。已在 `magic-core.js: buildDomain()` 统一校验：所有已知数（按份数计）
+   必须在 multiset 内，任意阶数生效；报错文案与 CSP 一致（“不在限定的数字范围内（或超出份数）”）。
+4. **verify-all.js（新文件）**：3–8 阶 × none/integer/classic/set 全矩阵。每格 0/1/2/3/n 个已知
+   （取自真实幻方：奇数阶缅甸法、4k 阶对角取补、6 阶 Strachey 硬编码；set 模式用 2v+1 仿射集合并
+   用对应真值校验）+ 矛盾（满盘一格+1）+ 超范围 + integer 分数无解。断言：不抛异常、结构完整、
+   步号对齐/前提引用、steps↔finalCells 数值一致、完整解线和全=S、填格缺口=0（含 CSP extras）、
+   推出值与基准幻方逐格一致、integer 示例无“/”、domain-S=总和/n 且第 1 步 special、
+   csp.exhaustive 稳定格全在 finalCells、count=1⇒complete、单例 ≤2s（实测最慢 1158ms，4 阶 CSP）、
+   全 pages 文字无“带正号/带负号/按系数加权/系数用于加权”。DOCX 每阶数生成一次，
+   `verify_docx_check.py` 用 zipfile + 自实现标签配平检查（无实体解析）校验。
+   本轮结果：**177/177 全过，6/6 DOCX 通过**。
+5. **test-core.js**：92 → **198 项**（新增矩阵冒烟：24 组合的步号/填格/域语义 + 任意阶超范围拒绝）。
+   **test-docx.js**：改为页数=步数+1、pages[0] 即第 1 步、无“记号/思路”标题、examples 块断言。
+6. **E2E（罐头结果隔离计算层，Chromium dev）**：`gen-canned.js` → `canned-e2e.js`（loshu/two/frac），
+   页面里 `MagicCore.solveMagicAsync = async () => CANNED_E2E.current`。已验证：帮助弹窗开/关与内容、
+   自动出数回填 6 绿格、求解 8 页、第一页=第 1 步、翻页、证明默认折叠、点击出数弹窗、
+   示例胶囊默认折叠→展开 5 条→点条目写入 9 格全黑→Ctrl+Z 回退→收起、
+   立体分数（填写框覆盖层 7、正文 .frac 138）、DOCX 链路 PK 签名、
+   dist 单文件 0 外链脚本、无 console 错误；截图经视觉模型走查通过。
+7. **判例补充**：Mimosa 钩子会拦 `ElementTree`（XML 实体扩展）与动态 `path.join` 进 fs 写——
+   Python 校验改自实现标签配平（先拒 DOCTYPE/ENTITY + 大小上限）；Node 写文件用**字面量路径表**。
 
 ## 9. 用户偏好（沟通/设计）
 
