@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幻方求解器 —— 任意阶 · 分数/小数 · 逐步最简证明</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%AE%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --given: #0b5cad; --derived: #146c2e; --new-bg: #fff3c4; --new-bd: #e0a800;
+    --dim: #667085; --err: #b00020; --line: #d7dce3; --bg: #f5f6f8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; background: var(--bg); color: #1f2328; line-height: 1.65; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 18px 16px 60px; }
+
+  header.app { border-bottom: 2px solid #2b5fd9; margin-bottom: 16px; padding-bottom: 10px; }
+  header.app h1 { font-size: 22px; margin: 0 0 4px; }
+  header.app p { margin: 0; color: var(--dim); font-size: 13.5px; }
+
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 16px; margin: 0 0 10px; color: #2b3a55; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .controls label { font-size: 14px; }
+  .controls label.chk { display: inline-flex; align-items: center; gap: 4px; color: #333c4e; }
+  select, button, input[type=text] { font: inherit; }
+  button { background: #2b5fd9; border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #1f47ae; }
+  button.ghost { background: #eef1f6; color: #2b3a55; }
+  button.ghost:hover { background: #e0e6ef; }
+  button.big { padding: 8px 22px; font-size: 15px; }
+
+  /* ---------- 填写区：正方形输入格 ---------- */
+  table.inp { border-collapse: collapse; margin: 6px 0; --inp-cell: 3em; }
+  table.inp td { border: 1px solid var(--line); padding: 3px; position: relative; }
+  table.inp input { width: var(--inp-cell); height: var(--inp-cell); padding: 2px; border: 1px solid transparent; text-align: center; font-size: 15px; border-radius: 4px; background: #fbfcfe; }
+  table.inp input:focus { outline: 1.5px solid #2b5fd9; background: #fff; }
+  table.inp input.bad { outline: 1.5px solid var(--err); background: #fdeeee; }
+  table.inp td i { position: absolute; left: 4px; top: 1px; font-size: 10px; color: #9aa3af; font-style: normal; pointer-events: none; }
+  table.inp.small { --inp-cell: 2.5em; }
+  table.inp.small input { font-size: 13px; }
+
+  .hint { font-size: 12.5px; color: var(--dim); }
+  .errbox { color: var(--err); font-size: 13.5px; white-space: pre-line; margin-top: 6px; }
+  textarea { width: 100%; font: 13px/1.5 Consolas, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+
+  /* ---------- 结果区 ---------- */
+  #result { display: none; }
+  .toolbar { position: sticky; top: 0; z-index: 5; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .toolbar .pginfo { font-size: 14px; min-width: 90px; text-align: center; }
+  .toolbar .sep { flex: 1; }
+  .toolbar select { padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+
+  .page { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px 22px; margin-bottom: 14px; }
+  .page.pg-hidden { display: none; }
+  .page .doc-title { font-size: 21px; font-weight: 700; border-bottom: 2px solid #2b5fd9; padding-bottom: 8px; margin-bottom: 12px; }
+  .blk-h2 { font-size: 17.5px; font-weight: 700; margin: 14px 0 6px; color: #1d2f52; border-left: 4px solid #2b5fd9; padding-left: 8px; }
+  .blk-h3 { font-size: 15px; font-weight: 700; margin: 12px 0 4px; color: #333c4e; }
+  .blk-p { margin: 6px 0; font-size: 14.5px; }
+  .blk-p .given { color: var(--given); font-weight: 600; }
+  .blk-p .derived { color: var(--derived); font-weight: 600; }
+  .blk-p .new { color: #9a6700; font-weight: 700; }
+  .blk-p .ok { color: var(--derived); }
+  .blk-p .err { color: var(--err); }
+  .blk-p .dim { color: var(--dim); }
+  .blk-p b { font-weight: 700; }
+
+  /* ---------- 证明区网格：正方形 + 尺寸随数字自适应 ---------- */
+  table.ms { border-collapse: collapse; margin: 8px auto; --ms-cell: 48px; }
+  table.ms td { border: 1px solid #b9c2cc; width: var(--ms-cell); height: var(--ms-cell); min-width: var(--ms-cell); text-align: center; vertical-align: middle; font-size: 15px; padding: 2px 4px; background: #fff; }
+  table.ms.compact td { font-size: 12.5px; }
+  table.ms td.k-given { color: var(--given); font-weight: 600; background: #eaf3fc; }
+  table.ms td.k-derived { color: var(--derived); font-weight: 600; background: #ecf6ef; }
+  table.ms td.k-new { color: #7a4d00; font-weight: 800; background: var(--new-bg); outline: 2px solid var(--new-bd); outline-offset: -2px; }
+  table.ms td.k-letter { color: #7c8794; font-style: italic; }
+  table.ms td.k-unknown { color: #98a2ad; font-style: italic; background: #fafbfc; }
+  table.ms td.k-dot { color: #cfd4da; }
+  table.ms td.k-diff { color: var(--err); background: #fdeeee; font-weight: 600; }
+  table.ms td.clickable { cursor: pointer; transition: filter .12s; }
+  table.ms td.clickable:hover { outline: 2.5px solid #2b5fd9; outline-offset: -2.5px; filter: brightness(1.04); }
+  .grid-cap { text-align: center; font-size: 12.5px; color: var(--dim); margin-top: 2px; }
+
+  /* ---------- 立体（上下结构）分数 ---------- */
+  .frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; line-height: 1.08; font-size: 0.82em; font-weight: inherit; }
+  .frac .num { padding: 0 4px 1px; border-bottom: 1.5px solid currentColor; }
+  .frac .den { padding: 1px 4px 0; }
+  .fsign { margin-right: 2px; font-size: 1.05em; }
+
+  table.data { border-collapse: collapse; margin: 8px 0; font-size: 13.5px; }
+  table.data th, table.data td { border: 1px solid #ccd3db; padding: 4px 10px; text-align: left; }
+  table.data th { background: #eef1f6; }
+  table.data td.ok { color: var(--derived); }
+  table.data td.err { color: var(--err); }
+  table.data .mono { font-family: Consolas, monospace; }
+
+  .legend { font-size: 12.5px; color: var(--dim); margin: 4px 0 0; }
+  .legend span { display: inline-block; margin-right: 12px; }
+  .sw { display: inline-block; width: 12px; height: 12px; border: 1px solid #b9c2cc; vertical-align: -1px; margin-right: 3px; border-radius: 3px; }
+
+  /* ---------- 推导详情弹窗 ---------- */
+  .modal-mask { position: fixed; inset: 0; background: rgba(15, 20, 30, .45); display: flex; align-items: flex-start; justify-content: center; padding: 36px 14px; z-index: 60; overflow: auto; }
+  .modal { background: #fff; border-radius: 12px; max-width: 800px; width: 100%; padding: 16px 22px 22px; box-shadow: 0 14px 44px rgba(0, 0, 0, .28); position: relative; }
+  .modal .modal-title { font-size: 17px; font-weight: 700; color: #1d2f52; border-left: 4px solid #e0a800; padding-left: 8px; margin: 2px 0 6px; }
+  .modal .modal-close { position: absolute; right: 10px; top: 8px; width: 32px; height: 32px; padding: 0; font-size: 17px; line-height: 1; border-radius: 50%; }
+  .modal .blk-h2 { display: none; }   /* 步骤标题已在弹窗标题中呈现 */
+
+  /* ---------- 打印 ---------- */
+  @media print {
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .wrap { max-width: none; padding: 0; }
+    .page { border: none; padding: 0 0 10px; page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    .page.pg-hidden { display: block !important; }
+    .blk-h2, .blk-h3 { page-break-after: avoid; }
+    table.ms, table.data { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app no-print">
+    <h1>幻方求解器</h1>
+    <p>任意阶（1–8）· 整数 / 分数 / 小数（精确有理数运算）· 输入即出数：凡能确定的格子全部推出，按“最少已知数优先”给出填数顺序与最简证明 · 点击推出的数可查看依据 · 分页 / 整页 / 打印 PDF / 导出 DOCX</p>
+  </header>
+
+  <section class="card no-print" id="inputCard">
+    <h2>① 输入幻方</h2>
+    <div class="controls">
+      <label>阶数 n =
+        <select id="selN">
+          <option>1</option><option>2</option><option selected>3</option><option>4</option>
+          <option>5</option><option>6</option><option>7</option><option>8</option>
+        </select>
+      </label>
+      <label class="chk" title="每填入/修改一个数字后自动重新出数"><input type="checkbox" id="autoSolve" checked> 输入即自动出数</label>
+      <button class="ghost" id="btnBatchToggle">批量填入…</button>
+      <button class="ghost" id="btnClear">清空</button>
+      <span style="flex:1"></span>
+      <button class="big" id="btnSolve">求 解</button>
+    </div>
+    <div id="gridBox"></div>
+    <div id="batchBox" style="display:none; margin-top:8px;">
+      <textarea id="batchText" rows="4" placeholder="按行粘贴数字，空格/逗号分隔，空缺用 - 或 . 表示，例如：&#10;2 7 -&#10;- 5 -&#10;- - 9"></textarea>
+      <div style="margin-top:4px;"><button class="ghost" id="btnBatchApply">应用到表格</button></div>
+    </div>
+    <div class="hint" style="margin-top:6px;">每个格子可填：整数（如 <code>12</code>）、最简或非最简分数（如 <code>1/2</code>、<code>10/4</code>）、小数（如 <code>0.75</code>）、甚至 <code>1.5/2</code>；留空 = 未知。输出时自动选用有效数字更少的表示（平手取最简分数），分数在图中以上下分式呈现。</div>
+    <div class="hint" style="margin-top:4px;">示例：</div>
+    <div class="controls" style="margin-top:2px;">
+      <button class="ghost" data-preset="two">三阶·两数定一格</button>
+      <button class="ghost" data-preset="loshu">三阶·经典洛书</button>
+      <button class="ghost" data-preset="frac">三阶·分数小数混合</button>
+      <button class="ghost" data-preset="durer">四阶·丢勒幻方</button>
+      <button class="ghost" data-preset="corner">四阶·四角定幻和</button>
+      <button class="ghost" data-preset="random">随机出题</button>
+    </div>
+    <div class="errbox" id="inputErr"></div>
+  </section>
+
+  <section id="result">
+    <div class="toolbar no-print">
+      <button class="ghost" id="btnPrev">◀ 上一步</button>
+      <span class="pginfo" id="pgInfo">1 / 1</span>
+      <button id="btnNext">下一步 ▶</button>
+      <span class="sep"></span>
+      <select id="selMode">
+        <option value="step">分步模式（每页一步）</option>
+        <option value="all">一页显示全部证明</option>
+      </select>
+      <button class="ghost" id="btnPrint">🖨 打印 / 导出 PDF</button>
+      <button class="ghost" id="btnDocx">📄 导出 DOCX</button>
+    </div>
+    <div id="pages"></div>
+    <p class="hint no-print" style="text-align:center;">提示：绿色（已推出）/ 黄色（本步新推出）的格子可点击，查看该数是根据哪几个数、依据什么结论推出的。打印时选择“另存为 PDF”即可导出 PDF。</p>
+  </section>
+</div>
+
+<script src="magic-core.js?v=17"></script>
+<script src="render.js?v=17"></script>
+<script src="docx.js?v=17"></script>
+<script src="app.js?v=17"></script>
+</body>
+</html>
