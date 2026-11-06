@@ -12,10 +12,10 @@ function eq(a, b, msg) { ok(a === b, msg + ' (期望 ' + b + '，得到 ' + a + 
 function section(name) { console.log('· ' + name); }
 
 function F(n, d) { return new Frac(n, d === undefined ? 1 : d); }
-function solve(n, obj) {
+function solve(n, obj, domain) {
   const m = new Map();
   for (const k in obj) m.set(Number(k), typeof obj[k] === 'string' ? Core.parseNumberString(obj[k]) : obj[k]);
-  return Core.solveMagic(n, m);
+  return Core.solveMagic(n, m, domain ? { domain: domain } : undefined);
 }
 
 /* ---------- 分数解析与显示 ---------- */
@@ -44,7 +44,7 @@ section('三阶：已知 a=1, i=9（仅两数）');
   eq(r.steps[0].d, 2, '中心用到 2 个已知数');
   ok(r.steps[0].theorem && r.steps[0].theorem.key === 'opposite', '识别为对顶定理');
   ok(r.steps[1].isS && r.steps[1].valueStr === '15', '第2步推出 S = 15');
-  eq(r.steps[1].d, 1, 'S 仅用中心 1 个数');
+  eq(r.steps[1].identity.lambda.length, 1, 'S 用一条整线求出（幻和直用，1 条线）');
   eq(r.complete, false, '未全部确定');
   eq(r.dimFree, 1, '剩余自由度 1');
   eq(r.undeterminedCells.length, 6, '6 个格子未定');
@@ -64,8 +64,8 @@ section('三阶：洛书（a=2, b=7, e=5）');
   const r = solve(3, { 0: '2', 1: '7', 4: '5' });
   ok(r.ok, '求解成功');
   const seq = r.steps.map(s => (s.isS ? 'S' : s.label) + '=' + s.valueStr).join(',');
-  eq(seq, 'S=15,h=3,i=8,d=9,c=6,g=4,f=1', '推导顺序与数值');
-  eq(r.steps.map(s => s.d).join(','), '1,2,2,2,2,2,2', '各步使用已知数个数（最少优先）');
+  eq(seq, 'h=3,S=15,c=6,g=4,d=9,f=1,i=8', '推导顺序（对顶 → 幻和 → 补线法链）');
+  eq(r.steps.map(s => s.identity ? s.identity.tech : 0).join(','), '3,1,1,1,1,1,1', '技巧从简：先对顶，再幻和直用');
   eq(r.complete, true, '完整解出');
   ok(r.verification && r.verification.rows.every(x => x.ok), '验证表全部通过');
   const expect = ['2', '7', '6', '9', '5', '1', '4', '3', '8'];
@@ -166,6 +166,57 @@ section('三阶：全部填满');
   ok(r.ok && r.complete && r.steps.length === 1 && r.steps[0].isS, '只剩 S 一步');
   eq(r.S.valueStr, '15', 'S=15');
   ok(r.verification.rows.every(x => x.ok), '验证通过');
+}
+
+/* ---------- 值域限定 ---------- */
+section('值域限定：1…n²（classic）');
+{
+  const r = solve(3, { 0: '2' }, { kind: 'classic' });
+  ok(r.ok, '求解成功');
+  eq(r.domain.kind, 'classic', '记录限定类型');
+  ok(r.steps[0].special === 'domain-S', '第 1 步是“直接得幻和”');
+  eq(r.steps[0].valueStr, '15', 'S = 15');
+  eq(r.steps[0].d, 0, '该步不需要任何已知数');
+  eq(r.csp.exhaustive, true, '穷举完成');
+  eq(r.csp.count, 2, 'a=2 时共 2 种合法填法（Lo Shu 的两种）');
+  eq(r.complete, false, '仅 2 种填法时不能唯一确定');
+}
+{
+  const r = solve(3, { 0: '2', 1: '7' }, { kind: 'classic' });
+  ok(r.ok && r.complete, 'a=2,b=7 + 1…9 限定 ⇒ 唯一解，完整解出');
+  eq(r.csp.count, 1, '穷举只有 1 种填法');
+  ok(r.finalCells.map(c => c.valueStr).join(',') === '2,7,6,9,5,1,4,3,8', '结果 = 洛书');
+}
+{
+  // 1…9 时角格不可能是 1（正常幻方角为偶数）→ 限定下无解
+  const r = solve(3, { 0: '1' }, { kind: 'classic' });
+  ok(!r.ok && /无解/.test(r.error), '限定 1…9 且角格=1 → 报告无解');
+}
+{
+  const r = solve(3, { 0: '2', 1: '2' }, { kind: 'classic' });
+  ok(!r.ok && /范围|份数/.test(r.error), '重复使用同一数字 → 报告超出份数');
+}
+
+section('值域限定：只允许整数');
+{
+  const r = solve(3, { 0: '1', 8: '2' }, { kind: 'integer' });
+  ok(!r.ok && /整数/.test(r.error), 'a=1,i=2 → 中心 3/2，整数限定下无解');
+}
+{
+  const r = solve(3, { 0: '1', 8: '9' }, { kind: 'integer' });
+  ok(r.ok, '整数限定下可解');
+  eq(r.integer.feasible, true, '找到整数填法见证');
+}
+
+section('值域限定：自定义集合');
+{
+  const vals = [];
+  for (let i = 1; i <= 9; i++) vals.push(Core.parseNumberString(String(i)));
+  const r = solve(3, { 0: '2' }, { kind: 'set', values: vals });
+  ok(r.ok && r.domain.kind === 'set', '自定义 1…9 集合求解成功');
+  eq(r.domain.S, '15', '由集合总和直接得 S = 15');
+  const bad = solve(3, { 0: '2' }, { kind: 'set', values: vals.slice(0, 5) });
+  ok(!bad.ok && /恰好/.test(bad.error), '数量不等于 n² 时报错');
 }
 
 console.log('\n结果: ' + passed + ' 通过, ' + failed + ' 失败');
