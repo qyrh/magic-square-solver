@@ -233,5 +233,36 @@ section('值域限定：自定义集合');
   ok(!bad.ok && /恰好/.test(bad.error), '数量不等于 n² 时报错');
 }
 
+/* ---------- 矩阵冒烟：3–8 阶 × 4 种值域（穷尽验证见 verify-all.js） ---------- */
+section('矩阵冒烟：3–8 阶 × 4 种值域');
+{
+  for (let n = 3; n <= 8; n++) {
+    for (const kind of ['none', 'integer', 'classic', 'set']) {
+      const dom = kind === 'set'
+        ? { kind: 'set', values: Array.from({ length: n * n }, (_, i) => F(i + 1)) }
+        : { kind: kind };
+      const r = solve(n, (kind === 'none' || kind === 'integer') ? { 0: '1' } : {}, dom);
+      ok(r.ok, 'n=' + n + ' ' + kind + ' 求解成功');
+      if (!r.ok) continue;
+      ok(r.steps.every((s, k) => s.i === k + 1), 'n=' + n + ' ' + kind + ' 步号对齐');
+      const extras = (r.csp && r.csp.ok && r.csp.exhaustive) ? (r.csp.extras || []).length : 0;
+      ok(r.finalCells.filter(Boolean).length === r.determinedCount - (r.S ? 1 : 0) + extras,
+        'n=' + n + ' ' + kind + ' 填格完整（缺口 0）');
+      if (kind === 'classic' || kind === 'set') {
+        ok(r.steps.length >= 1 && r.steps[0].special === 'domain-S', 'n=' + n + ' ' + kind + ' 第1步直得幻和');
+        if (n <= 4) ok(!!r.csp, 'n=' + n + ' ' + kind + ' 有穷举结果');
+      }
+      if (kind === 'integer') {
+        ok(r.integer && r.integer.feasible === true, 'n=' + n + ' integer 有整数见证');
+        const smp = (r.sampling && r.sampling.samples) || [];
+        ok(smp.every(s => s.every(v => !v.includes('/'))), 'n=' + n + ' integer 示例全整数');
+      }
+    }
+    // 超范围已知数（classic）：任意阶都必须拒绝（n≥5 曾漏校验）
+    const bad = solve(n, { 0: String(n * n + 1) }, { kind: 'classic' });
+    ok(!bad.ok && /范围|份数/.test(bad.error), 'n=' + n + ' classic 超范围已知数被拒绝');
+  }
+}
+
 console.log('\n结果: ' + passed + ' 通过, ' + failed + ' 失败');
 process.exit(failed ? 1 : 0);
