@@ -4,7 +4,7 @@
 > 目录：`D:\glm-db\.zcode\workspace\draft-85724259-c664-4d90-9290-644bc2e3e3dc\magic-square-solver\`
 > 仓库：https://github.com/qyrh/magic-square-solver 　在线：https://qyrh.github.io/magic-square-solver/
 > 单文件：`dist/幻方求解器.html`（由 `node build.js` 生成）
-> 最后更新：2026-11-06（第 4 轮：值域限定 + 复杂度优先择优）
+> 最后更新：2026-11-06（第 5 轮：去掉 1/2 阶、分数全立体、证明改“重合抵消”讲法、系数优先为 1）
 
 ## 0. 一分钟上手
 
@@ -161,6 +161,23 @@ gh api repos/qyrh/magic-square-solver/pages/builds/latest -q '.status'
 - `test-docx.js`：文档块结构（含证明折叠块）、DOCX zip/OOXML 合法、立体分数分数线、正方形行高。
 - 浏览器：域下拉/自定义集合显隐、自动出数回填、撤回重做、快速/完整切换、证明折叠、
   红蓝画块、点击弹窗、随机试解段落、DOCX 真实下载。
+
+## 8.5 第 5 轮改动（务必保持）
+
+1. **界面只提供 3–8 阶**（`index.html#selN` 已删除 1、2；核心仍支持 1/2 仅供测试）。
+2. **分数必须立体显示**，三处都要：
+   - 填写框：`app.js: inputsUpdateFrac()` 用 `.frac-ov` 覆盖层（输入框本身排不了上下分式；
+     聚焦时显示原文本便于编辑，失焦恢复分式）；
+   - 证明/总结区：`renderTextWithFrac()` 把正文里的 `33/4` 之类也转成上下分式；
+   - 网格与 DOCX：`fracHtml()` / `docx.js: gridXml` 的分子段落下边框当分数线。
+3. **证明不用负系数**：`render.js: stepBlocks` 的证明分支只写“红组/蓝组、条数、kS、重合抵消”，
+   禁止再出现“系数/加权/带正号/带负号”等措辞（有回归测试断言）。
+4. **马步定理专用证明**：`render.js: knightGroups()` —— 红组 = 过角一行+一列+过角对角线，
+   蓝组 = 全部 n 条行线；抵消后红 `2·a`、蓝 `f,h`。
+5. **系数优先为 1**：`magic-core.js` 择优 score 第 2 位是 `maxAbs`（|λ| 最大值），
+   其次才是 Σ|λ|、涉及格子数、前提数。随机扫描 75 例中仅 1 例仍需 |λ|=2（4 阶 4 已知的某格），
+   此时画块写“2·a”，仍用重合语言解释。
+6. 补线法（幻和−其余）与整线求 S 有独立的最简讲法分支，不走红蓝组。
 
 ## 9. 用户偏好（沟通/设计）
 
