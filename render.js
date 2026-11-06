@@ -6,8 +6,9 @@
  *   {t:'p', segs:[{text, b?, i?, cls?}]}        cls: given/derived/new/ok/err/dim
  *   {t:'grid', n, cells:[{text, kind, row?}], caption?}   kind: given/derived/new/letter/dot/diff
  *   {t:'table', head:[segs], rows:[[segs]], caption?}
+ *   {t:'examples', n, items:[{label, note, values:[str], grid}]}   示例填法（UI 折叠/DOCX 展开）
  *   {t:'pagebreak'}
- * buildDocument(result) → {pages:[块数组...], title}
+ * buildDocument(result) → {pages:[块数组...], title}（第一页即第 1 步，无前置说明页）
  * ========================================================================= */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) { module.exports = factory(); }
@@ -383,26 +384,63 @@
     return _core;
   }
 
-  /* ---- 首页（题目） ---- */
-  function introBlocks(result) {
-    const model = result.model, n = result.n;
-    const bl = [];
-    bl.push({ t: 'title', text: n + ' 阶幻方求解 —— 逐步推出所有能确定的格子' });
-    bl.push(P(S('一个 ' + n + ' 阶幻方要求：每一行、每一列、主对角线、副对角线上的 ' + n + ' 个数之和都相等。把这个相等的和记作 '), B('幻和 S'), S('（事先未知）。数字可以是整数、分数或小数。')));
-    if (result.givens.length > 0) {
-      bl.push(P(B('已知格子：'), S(result.givens.map(function (g) { return g.label + ' = ' + g.valueStr + '（第' + g.r + '行第' + g.c + '列）'; }).join('；') + '。')));
-    } else {
-      bl.push(P(B('目前没有填入任何已知数。'), S('此时任何格子都无法确定。', { cls: 'err' })));
+  /* ---- 示例填法块：{t:'examples', n, items:[{label, note, values, grid}]} ----
+   * 网页端折叠为“示例”两字胶囊（点击展开列表，点击条目写入填写区）；
+   * DOCX/打印端完整展开（每个条目一张网格图）。 */
+  function examplesBlock(result) {
+    const n = result.n;
+    const givSet = new Set(result.givens.map(function (g) { return g.coord; }));
+    const items = [];
+    const push = function (cells, note, kindOf, capText) {
+      const cs = cells.map(function (t, idx) { return { text: t, kind: kindOf(idx) }; });
+      items.push({
+        label: '示例 ' + (items.length + 1),
+        note: note,
+        values: cells.slice(),
+        grid: GRID(n, cs, [S(capText)])
+      });
+    };
+    // ① 反例双填法（已知数定不住全部格子时，证明“这些格子确实还能变”）
+    if (result.examples && result.examples.length) {
+      const isInt = result.domain && result.domain.kind === 'integer';
+      for (let i = 0; i < result.examples.length; i++) {
+        const ex = result.examples[i];
+        push(ex.cells,
+          '满足全部已知条件' + (isInt ? '且全为整数' : '') + '，未确定的格子取值不同',
+          function (idx) { return givSet.has(idx) ? 'given' : (result.undeterminedCells.indexOf(idx) >= 0 ? 'diff' : 'derived'); },
+          '示例 ' + (items.length + 1) + '：与已知相容的填法（幻和 S = ' + ex.S + '）' + (isInt ? '，全为整数' : '') + '。未确定的格子取值不同，说明它们无法由已知数推出');
+      }
     }
-    bl.push(stateGrid(model, result.givens.map(function (g) { return { coord: g.coord, valueStr: g.valueStr, source: null }; }), -1));
-    bl.push(H3('记号'));
-    bl.push(P(S('按行的顺序给每个格子一个字母（下图），后文用字母指代格子；S 表示幻和。')));
-    bl.push(letterGrid(model, Array.from({ length: model.N }, function (_, i) { return i; })));
-    bl.push(H3('思路'));
-    bl.push(P(S('任何 ' + n + ' 阶幻方的全部填法共有 '), B(model.m + ' 个自由参数'), S('。若某格在“满足全部已知条件的所有填法”中取值都相同，它就是可确定的。下面从'), B('需要已知数最少'), S('的结论开始：每一步先证明一条对任意幻方都成立的恒等式（用字母，与具体数字无关），再代入本题数字，从而“出数”一个格子；如此逐步推出所有能确定的格子。即使已知数不足以解出整个幻方，凡能确定的格子都会被推出。'),
-      S('输入时程序处于快速模式：只把能确定的数自动回填到填写框（不展示证明）；点'), B('“求 解”'), S('后才给出完整的逐步证明（证明默认折叠，点击可展开；每步只标注该步涉及的格子字母）。'),
-      S('证明按技巧从简到难选择：能用幻和直出的优先，其次是“两线去交叉”“多线去交叉（容斥）”等组合技巧，并尽量配画块示意（红色部分 = 蓝色部分）。')));
-    return bl;
+    // ② 随机试解 / 整数填法示例
+    const sp = result.sampling;
+    if (sp && sp.samples && sp.samples.length) {
+      if (sp.illustrative) {
+        const varying = new Set(sp.varyingCells || []);
+        for (let q = 0; q < sp.samples.length; q++) {
+          push(sp.samples[q], '全部为整数且满足已知条件的填法',
+            function (idx) { return givSet.has(idx) ? 'given' : (varying.has(idx) ? 'diff' : 'derived'); },
+            '示例 ' + (items.length + 1) + '：整数填法（“只允许整数”下的合法填法 ' + (q + 1) + ' / ' + sp.count + '）。只作存在性示意，不作为“确定”的证明');
+        }
+      } else if (!sp.unique) {
+        const stable = new Set(sp.stableCells);
+        for (let q = 0; q < sp.samples.length; q++) {
+          push(sp.samples[q], '随机试解得到的一组解（满足全部已知条件）',
+            function (idx) { return givSet.has(idx) ? 'given' : (stable.has(idx) ? 'derived' : 'diff'); },
+            '示例 ' + (items.length + 1) + '：随机试解（' + (q + 1) + ' / ' + sp.count + '）。红色 = 各次取值不同的格子，绿色 = 每次都相同');
+        }
+      }
+    }
+    // ③ 有限值域穷举所得的合法填法
+    if (result.csp && result.csp.ok && result.csp.exhaustive && result.csp.count > 1 && result.csp.samples && result.csp.samples.length) {
+      const stableSet = new Set(result.csp.stableCells || []);
+      for (let q = 0; q < Math.min(2, result.csp.samples.length); q++) {
+        push(result.csp.samples[q], '限定范围内的合法填法（穷举所得）',
+          function (idx) { return givSet.has(idx) ? 'given' : (stableSet.has(idx) ? 'derived' : 'diff'); },
+          '示例 ' + (items.length + 1) + '：限定范围内的合法填法 ' + (q + 1) + ' / ' + result.csp.count + '。取值相同的格子（绿色）即穷举证明的确定解');
+      }
+    }
+    if (!items.length) return null;
+    return { t: 'examples', n: n, items: items };
   }
 
   /* ---- 总结页 ---- */
@@ -419,27 +457,15 @@
       const undLetters = result.undeterminedCells.map(function (c) { return model.letters[c]; });
       bl.push(P(B('在给定条件下，只能确定部分格子。'), S('无法唯一确定的格子：' + (undLetters.join('、') || '无') + '；解空间还剩 ' + result.dimFree + ' 个自由参数。')));
       bl.push(stateGrid(model, snapAll, -1, [S('蓝色 = 题设，绿色 = 已推出，灰色字母 = 无法唯一确定。')]));
-      if (result.examples) {
-        bl.push(P(S('下面两种填法都满足全部已知条件' + (result.domain && result.domain.kind === 'integer' ? '（且每个数都是整数）' : '') + '，但未确定的格子取值不同——这正说明这些格子无法由已知数推出：')));
-        for (let i = 0; i < result.examples.length; i++) {
-          const ex = result.examples[i];
-          const cells = ex.cells.map(function (t, idx) {
-            const isUnd = result.undeterminedCells.indexOf(idx) >= 0;
-            const isGiv = result.givens.some(function (g) { return g.coord === idx; });
-            return { text: t, kind: isUnd ? 'diff' : (isGiv ? 'given' : 'derived') };
-          });
-          bl.push(GRID(n, cells, [S('填法' + '一二'.charAt(i) + '（幻和 S = ' + ex.S + '）')]));
-        }
-      }
     }
 
-    // 值域限定说明
+    // 值域限定说明（简短；详细说明见页面右上角“?”帮助）
     if (result.domain && result.domain.kind !== 'none') {
       bl.push(H3('值域限定：「' + result.domain.note + '」'));
       if (result.domain.S) {
-        bl.push(P(S('由限定「' + result.domain.note + '」，全部数字之和 = ' + result.domain.total + '，' + n + ' 条行线恰好覆盖全部格子一次，所以 ' + n + '·S = ' + result.domain.total + '，即 '), B('S = ' + result.domain.S), S('（第 1 步已证）。此后每一步都能直接使用幻和。')));
+        bl.push(P(S('由限定「' + result.domain.note + '」，全部数字之和 = ' + result.domain.total + '，' + n + ' 条行线恰好覆盖全部格子一次，所以 ' + n + '·S = ' + result.domain.total + '，即 '), B('S = ' + result.domain.S), S('（第 1 步已证）。')));
       } else if (result.domain.kind === 'integer') {
-        bl.push(P(S('限定“只允许整数”：解出的每个数都必须是整数。程序会检查所有可确定的数是否都是整数，并尝试构造一组整数填法作为存在性见证。')));
+        bl.push(P(S('限定“只允许整数”：解出的每个数都必须是整数。')));
       }
     }
     if (result.integer) {
@@ -450,7 +476,7 @@
       }
     }
 
-    // 穷举验证（有限值域）
+    // 穷举验证结论（示例填法统一折叠进“示例”块）
     if (result.csp && result.csp.ok) {
       bl.push(H3('穷举验证（在限定数字范围内枚举所有合法填法）'));
       if (result.csp.exhaustive) {
@@ -462,22 +488,12 @@
           const stableSet = new Set(result.csp.stableCells || []);
           const stableNames = [];
           for (const c of stableSet) {
-            const e = result.knownEntries.find(function (x) { return x.coord === c; });
-            if (e && c !== result.model.SC) stableNames.push(result.model.letters[c]);
+            if (c !== model.SC && result.finalCells[c]) stableNames.push(model.letters[c]);
           }
           bl.push(P(S('在这 ' + result.csp.count + ' 种填法里，'), B(stableNames.length ? stableNames.join('、') : '（没有）'),
             S(' 每次都取相同的值——所以它们是确定解（填别的数就无解）；其余格子在不同填法里会变，说明现有已知数定不住它们。')));
           if (extra.length > 0) {
-            bl.push(P(S('其中 ' + extra.map(function (c) { return result.model.letters[c]; }).join('、') + ' 是线性推导推不出、但穷举能确定的（已作为最后一步自动填入）。')));
-          }
-          if (result.csp.samples && result.csp.samples.length > 1) {
-            for (let q = 0; q < Math.min(2, result.csp.samples.length); q++) {
-              const cells = result.csp.samples[q].map(function (t, idx) {
-                const isGiv = result.givens.some(function (g) { return g.coord === idx; });
-                return { text: t, kind: isGiv ? 'given' : (stableSet.has(idx) ? 'derived' : 'diff') };
-              });
-              bl.push(GRID(n, cells, [S('合法填法示例 ' + (q + 1) + ' / ' + result.csp.count)]));
-            }
+            bl.push(P(S('其中 ' + extra.map(function (c) { return model.letters[c]; }).join('、') + ' 是线性推导推不出、但穷举能确定的（已作为最后一步自动填入）。')));
           }
         }
       } else {
@@ -485,38 +501,16 @@
       }
     }
 
-    // 随机试解验证
+    // 示例填法（两字胶囊，点击展开 / 点击条目写入填写区）
+    const exBlk = examplesBlock(result);
+    if (exBlk) bl.push(exBlk);
     const sp = result.sampling;
-    if (sp) {
-      if (sp.illustrative) {
-        // 整数限定：给出若干组全整数填法作为示例（不作“确定”的完备性证明）
-        bl.push(H3('整数填法示例（对应「只允许整数」）'));
-        const varying = new Set(sp.varyingCells || []);
-        bl.push(P(S('下面给出 ' + sp.count + ' 组'), B('全部为整数'), S('的填法（都满足已知条件）。红色格子在示例中取值不同，说明现有已知数确实定不住它们；')));
-        bl.push(P(S('绿色只是在本例这几组里相同，' + '不作为“确定”的证明——某个数是否确定，以上面逐步推导的结论为准。', { cls: 'dim' })));
-        for (let q = 0; q < sp.samples.length; q++) {
-          const cells = sp.samples[q].map(function (t, idx) {
-            const isGiv = result.givens.some(function (g) { return g.coord === idx; });
-            return { text: t, kind: isGiv ? 'given' : (varying.has(idx) ? 'diff' : 'derived') };
-          });
-          bl.push(GRID(n, cells, [S('整数填法示例 ' + (q + 1) + ' / ' + sp.count)]));
-        }
-      } else if (sp.unique) {
-        bl.push(H3('随机试解验证（换个角度看“能否确定”）'));
-        bl.push(P(S('在全部已知条件下随机试解：无论怎么取，只能得到同一组数——说明每个格子都被唯一确定（这也与上面逐格推出的结果一致）。')));
-      } else {
-        bl.push(H3('随机试解验证（换个角度看“能否确定”）'));
-        const stable = new Set(sp.stableCells);
-        bl.push(P(S('在满足全部已知条件的解空间里随机取了 '), B(sp.count + ' 组'), S(' 解（下面展示其中 3 组；红色 = 各次取值不同的格子，绿色 = 每次都相同的格子）：')));
-        bl.push(P(S('每次都取相同值的格子，恰好就是上面推出的那些格子（与线性判定' + (sp.agreeWithLinear ? '完全一致 ✓' : '不一致 ✗（不应发生）') + '）。这正说明：往这些格子里填别的数字就无解——它们是确定解，所以程序自动填上了；红色格子还能变，说明现有已知数定不住它们。')));
-        for (let q = 0; q < sp.samples.length; q++) {
-          const cells = sp.samples[q].map(function (t, idx) {
-            const isGiv = result.givens.some(function (g) { return g.coord === idx; });
-            return { text: t, kind: isGiv ? 'given' : (stable.has(idx) ? 'derived' : 'diff') };
-          });
-          bl.push(GRID(n, cells, [S('随机解 ' + (q + 1) + ' / ' + sp.count)]));
-        }
-      }
+    if (sp && !exBlk) {
+      // 无示例图时仍给一句交叉验证结论
+      if (sp.unique) bl.push(P(S('随机试解：无论怎么取都得到同一组数——与逐格推出的结果一致 ✓', { cls: 'dim' })));
+    } else if (sp) {
+      if (sp.illustrative) bl.push(P(S('整数模式：以上示例全为整数，仅作存在性示意；某格是否确定以逐步推导的结论为准。', { cls: 'dim' })));
+      else if (!sp.unique) bl.push(P(S('随机试解 ' + sp.count + ' 组：每次都取相同值的格子，恰好就是上面逐步推出的那些（与线性判定' + (sp.agreeWithLinear ? '完全一致 ✓' : '不一致 ✗（不应发生）') + '）。', { cls: 'dim' })));
     }
 
     bl.push(H3('填数顺序一览'));
@@ -543,16 +537,13 @@
     return bl;
   }
 
-  /* ---- 主入口 ---- */
+  /* ---- 主入口 ----（第一页即“第 1 步”：前置说明页已移入页面右上角“?”帮助弹窗） */
   function buildDocument(result) {
     const pages = [];
     if (!result.ok) {
       pages.push([{ t: 'title', text: '无法求解' }, P(S(result.error, { cls: 'err' }))]);
       return { pages: pages, title: '幻方求解' };
     }
-    const intro = introBlocks(result);
-    intro.push(BRK());
-    pages.push(intro);
     for (const st of result.steps) {
       const bl = stepBlocks(result, st);
       bl.push(BRK());
