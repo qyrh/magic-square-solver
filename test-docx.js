@@ -24,8 +24,8 @@ function buildCase(n, giv) {
   const step1 = pages[1];
   const txt = JSON.stringify(step1);
   ok(/证明/.test(txt) && /运用/.test(txt) && /示意图/.test(txt), '每步含 证明/运用/示意图');
-  // 第一步是 S：证明里应出现 “×S”
-  ok(/×S/.test(txt), 'S 的推导证明含幻和记号');
+  // 第一步是 S：证明里应出现幻和定义（单线求和）
+  ok(/幻和/.test(txt) && /S/.test(txt), 'S 的推导证明含幻和定义');
 }
 
 // 2) 两数定一格：证明里应出现对顶定理与字母
