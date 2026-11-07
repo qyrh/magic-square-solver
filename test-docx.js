@@ -25,8 +25,11 @@ function buildCase(n, giv) {
   const txt = JSON.stringify(step1);
   ok(/第 1 步/.test(txt), '第一页即“第 1 步”（无前置说明页）');
   ok(/证明/.test(txt) && /运用/.test(txt) && /示意图/.test(txt), '每步含 证明/运用/示意图');
-  // 第一步是 S：证明里应出现幻和定义（单线求和）
-  ok(/幻和/.test(txt) && /S/.test(txt), 'S 的推导证明含幻和定义');
+  // 定位真正的 S 步页面（h2 含“确定 幻和 S”），断言其证明含幻和定理讲法
+  const sPage = pages.find(p => p.some(b => b.t === 'h2' && /确定 幻和 S/.test(b.text)));
+  ok(!!sPage, '存在“确定 幻和 S”的步骤页');
+  const sTxt = sPage ? JSON.stringify(sPage) : '';
+  ok(/幻和的定义|整线|条完整线上/.test(sTxt), 'S 步证明含“整线求和”讲法');
   const h3s = [];
   pages.forEach(p => p.forEach(b => { if (b.t === 'h3') h3s.push(b.text); }));
   ok(!h3s.includes('记号') && !h3s.includes('思路'), '无前置说明页的“记号/思路”标题');
@@ -38,7 +41,7 @@ function buildCase(n, giv) {
   const doc = Render.buildDocument(r);
   const t = JSON.stringify(doc.pages[0]);
   ok(/对顶定理/.test(t), '识别对顶定理');
-  ok(/2·e = a \+ i|2·e/.test(t), '含恒等式 2e = a + i 形式');
+  ok(t.includes('2·e = a + i'), '含完整恒等式 2·e = a + i');
   const last = doc.pages[doc.pages.length - 1];
   const exB = last.filter(b => b.t === 'examples');
   ok(exB.length === 1 && exB[0].items.length >= 2, '总结页含“示例”折叠块（≥2 组，得到 ' + (exB.length ? exB[0].items.length : 0) + '）');
@@ -63,11 +66,19 @@ function buildCase(n, giv) {
   console.log('  已生成 ' + out + '，供 Python 校验');
 }
 
-// 4) 立体分数与正方形格子在 DOCX 中的断言
+// 4) 立体分数与正方形格子在 DOCX 中的断言（store 不压缩，document.xml 原文可在字节流中直接搜索）
 {
   const rf = buildCase(3, { 0: '1/2', 1: '1/3', 4: '2.75' });
   const docF = Render.buildDocument(rf);
   const bytes = Docx.buildDocx(docF.pages, docF.title);
+  const raw = Buffer.from(bytes).toString('latin1');
+  const pBdr = (raw.match(/<w:pBdr>/g) || []).length;
+  ok(pBdr >= 10, 'DOCX 含立体分数分数线 pBdr（' + pBdr + ' 处 ≥10）');
+  const heights = (raw.match(/<w:trHeight w:val="(\d+)" w:hRule="atLeast"\/>/g) || [])
+    .map(s => Number(s.match(/"(\d+)"/)[1]));
+  const cols = new Set((raw.match(/<w:gridCol w:w="(\d+)"\/>/g) || []).map(s => Number(s.match(/"(\d+)"/)[1])));
+  ok(heights.length >= 10, 'DOCX 含正方形行高 trHeight（' + heights.length + ' 处 ≥10）');
+  ok(heights.every(h => cols.has(h)), '每个 trHeight 都等于某个 gridCol 宽（正方形格）');
   fs.writeFileSync(path.join(__dirname, 'sample-frac.docx'), bytes);
   console.log('  已生成分数样例 sample-frac.docx');
 }
