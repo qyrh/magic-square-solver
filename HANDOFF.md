@@ -4,15 +4,15 @@
 > 目录：`D:\glm-db\.zcode\workspace\draft-85724259-c664-4d90-9290-644bc2e3e3dc\magic-square-solver\`
 > 仓库：https://github.com/qyrh/magic-square-solver 　在线：https://qyrh.github.io/magic-square-solver/
 > 单文件：`dist/幻方求解器.html`（由 `node build.js` 生成）
-> 最后更新：2026-11-06（第 8 轮：classic/set 示例改用穷举合法填法（不再出分数）、
-> 示例展示改方格图卡片、4 个审查子代理 15 项发现全部修复；index.html ?v=24。
-> 第 7 轮：示例折叠+点击写入、删首页说明页+“?”帮助、verify-all 全矩阵、超范围校验）
+> 最后更新：2026-11-07（第 9 轮：7 角度子代理审查 34 项全修复——Frac 精确运算、CSP 近增值防护、
+> 8 阶满盘 38ms、center-S 死分支、竞态守卫、文字-数学一致、测试有效性；index.html ?v=25。
+> 第 8 轮：classic/set 示例改用穷举合法填法、示例改方格图。第 7 轮：示例折叠+删首页说明页）
 
 ## 0. 一分钟上手
 
 ```bash
 cd magic-square-solver
-node test-core.js     # 214 项断言（必须全过；含 3–8 阶 × 4 值域矩阵冒烟 + 示例合法性回归）
+node test-core.js     # 223 项断言（必须全过；含矩阵冒烟、示例合法性与数学回归）
 node test-docx.js     # 文档块 + DOCX 结构自检
 node verify-all.js    # 全阶数(3–8)×全模式(4种)穷尽验证：177 例 + DOCX 6 个 Python 校验
 node build.js         # 生成 dist/幻方求解器.html 单文件版（会自检无外链脚本）
@@ -282,6 +282,52 @@ gh api repos/qyrh/magic-square-solver/pages/builds/latest -q '.status'
    三张互不相同）；4 阶 classic 示例 = 1..16 排列；点击穷举定格弹窗正常。
 6. 已知机器相关项（保留）：verify-all 单例 2s 上限 vs 4 阶 CSP 墙钟截断（maxMs=1500），
    本机最慢 918ms 余量 ~2 倍；慢机可能假 FAIL，可放宽 TIME_LIMIT_MS。
+
+## 8.9 第 9 轮改动（7 角度子代理逐行审查：34 项发现全修复，2026-11-07）
+
+7 个审查角度：数学×3（线性代数 / 恒等式与定理 / CSP 与整数）、性能、代码边界、测试有效性、文字-数学一致。
+
+**数学修复（magic-core.js）**
+1. **Frac 中间积静默舍入**（中危）：`add/sub` 同分母快速路径（精确）+ 异分母 `mulExact`（>2^53 立即报 OVERFLOW）；
+   `mul/div` 乘前约分。审查反例 `Frac(3002399751580331,3).sub(Frac(3002399751580338,3))` 曾得 8/9，现得 1（有回归测试）。
+2. **center-S 分支 (a) 死分支**（漏判）：条件误写 `α_S = γ·n`（恒假），改为 `α_S·n = γ`；
+   现在“已知 S → 中心”与“已知中心 → S”双向都标注中心定理（回归测试）。
+3. **CSP 近增值浮点洞**（可构造假无解）：不同值 double 碰撞（如 67114657/67114656 vs 67114658/67114657）
+   会让 availSorted 排序/上下界剪枝不可靠 → `buildDomain` 预检拒绝“过近值”（回归测试用真实碰撞对）。
+4. **fmt/parse 位数回环断裂**：exactDecimal 上限 2^52→10^15−1，保证小数显示 ≤15 位可被 parseDec 读回
+   （曾可产出 16 位小数 → CSP extras 注入抛异常；回归测试）。
+5. prepareSolve：调用方显式给的 S 与值域 S 不一致时报矛盾（原来静默覆盖）。
+6. 大分母限定数字 / 整数检查溢出：solveMagic/Async 包 try→`ok:false`（不再抛异常）。
+
+**性能修复**
+7. **findMinimal 回退短路**：tech-1（补线法/整线求 S）可直接构造时跳过“全量系数解+贪心收缩”——
+   **8 阶满盘从估算 1.7–2.4s → 实测 38ms**。
+8. **solveCSP 预排序**：distinct 值一次排序，bounds 从两端按份数取（O(D)），去掉每次全量展开+排序；
+   verify-all 最慢单例 ~950ms → **639ms**。
+9. checkIntegerSolutions：`new Frac(t)` 提出内层循环 + 1s 时间护栏（超时转“未找到”诚实文案）。
+10. buildDomain 不再重复 buildModel（只算 N/SC）；randomPuzzle 每格让出一次（原每 3 次）。
+    CSP 仍为同步块（≤maxMs≈1.5s 上限）——已知限制，未分片（风险大）；实测 639ms。
+
+**交互/显示修复（app.js / render.js / index.html / docx.js）**
+11. 竞态：`buildInputs` 时 `state.token++`（旧求解结果不得写进新网格）+ `autofillDerived` 长度守卫。
+12. Ctrl+Z/Y 在批量文本/限定数字输入框内留给原生撤回（不撤幻方格子）；←/→ 翻页忽略 SELECT。
+13. 批量填入：3–8 行下界校验 + 行数不齐提示 + syncDomainUI；预设/随机出题补 syncDomainUI。
+14. 随机出题：生成期间切阶数则丢弃结果（try/finally 恢复按钮）。
+15. btnProofs 标签与实际折叠状态同步（renderPages 复位 / beforeprint 更新）。
+16. 验证表 ✓/✗ 与画块图注的颜色/加粗：CSS 色字类从 .blk-p 作用域解放为全局；docx captionPara 保留 cls/b。
+17. scheduleAuto 已排队定时器复查 autoSolve 勾选。
+18. 文字-数学一致：马步定理“各出现同样的次数”对角格 3≠1 为假 → 改“按两边中较少的次数成对抵消（角格红 3 蓝 1，抵消后剩 2·a）”；
+    csp 步标题“所有合法填法都相同”字面假 → “这些格子在所有合法填法中都取相同的值”；
+    示例图例“即穷举证明的确定解”按 exhaustive 门控；删光 `**` 字面星号（4 处）。
+
+**测试有效性修复（防虚假信心）**
+19. test-docx：S 步断言改为定位真实 S 页（原断言任何页恒真）；`2·e = a + i` 精确匹配（原子串吞掉）；
+    新增 pBdr/trHeight=gridCol 字节级断言（原“断言”章节零断言）。
+20. verify-all：负例正则按模式收紧（none/integer 只认“矛盾”）；FORBIDDEN 追加“系数/加权”两词
+    （已核实现有文案不含）；collectText 收 it.note；6b 新增示例标注 S=行和断言。
+21. test-core：五阶死断言改显式 !complete；两处空转断言（||[] 恒真）改为要求非空；4 项新回归
+    （Frac 精确/16 位退分数/center-S 双向/近增值拒绝/大分母优雅报错）。共 **223 项**。
+22. verify_docx_check.py：删死代码、拒绝 CDATA、属性引号成对检查。
 
 ## 9. 用户偏好（沟通/设计）
 
