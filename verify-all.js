@@ -17,7 +17,7 @@ const Docx = require('./docx.js');
 
 const MODES = ['none', 'integer', 'classic', 'set'];
 const NS = [3, 4, 5, 6, 7, 8];
-const FORBIDDEN = ['带正号', '带负号', '按系数加权', '系数用于加权'];
+const FORBIDDEN = ['带正号', '带负号', '按系数加权', '系数用于加权', '系数', '加权'];
 const TIME_LIMIT_MS = 2000;
 
 /* DOCX 输出路径：全部为字面量（无动态拼接） */
@@ -179,7 +179,7 @@ function verifyPositive(n, mode, trueSq, givenMap, domain, caseName) {
   //    所有线和相等、保留全部已知数；classic/set 还必须是限定数字的排列（每个数恰好用一次）
   {
     const shownGrids = [];
-    (r.examples || []).forEach(e => shownGrids.push({ src: 'examples', cells: e.cells }));
+    (r.examples || []).forEach(e => shownGrids.push({ src: 'examples', cells: e.cells, S: e.S }));
     if (r.sampling && r.sampling.samples) r.sampling.samples.forEach(s => shownGrids.push({ src: 'sampling', cells: s }));
     if (r.csp && r.csp.samples) r.csp.samples.forEach(s => shownGrids.push({ src: 'csp', cells: s }));
     const msSorted = (mode === 'classic' || mode === 'set')
@@ -207,6 +207,9 @@ function verifyPositive(n, mode, trueSq, givenMap, domain, caseName) {
       { let s2 = new Frac(0); for (let i = 0; i < n; i++) s2 = s2.add(fr[i * n + i]); if (!s2.equals(S0)) bad.push('主对角线'); }
       { let s2 = new Frac(0); for (let i = 0; i < n; i++) s2 = s2.add(fr[i * n + (n - 1 - i)]); if (!s2.equals(S0)) bad.push('副对角线'); }
       if (bad.length) fails.push(g.src + ' 示例不是幻方（' + bad.join('、') + ' 和不等）');
+      // 示例标注的幻和必须与该网格自身的行和一致（沿方向平移时 S 会变）
+      if (g.S != null && !Core.parseNumberString(g.S).equals(S0))
+        fails.push(g.src + ' 示例标注 S=' + g.S + ' 与其行和 ' + Core.fmtNumber(S0) + ' 不一致');
       // 保留已知数
       for (const e of givenMap) {
         if (!fr[e[0]].equals(e[1])) { fails.push(g.src + ' 示例未保留已知数（格 ' + e[0] + '）'); break; }
@@ -253,7 +256,7 @@ function collectText(blocks, out) {
     if (b.head) for (const h of b.head) if (h && h.text != null) out.push(h.text);
     if (b.rows) for (const row of b.rows) for (const c of row) if (c && c.text != null) out.push(c.text);
     if (b.caption) for (const s of b.caption) if (s && s.text != null) out.push(s.text);
-    if (b.items) for (const it of b.items) { out.push(it.label || ''); if (it.grid) collectText([it.grid], out); }
+    if (b.items) for (const it of b.items) { out.push(it.label || ''); if (it.note) out.push(it.note); if (it.grid) collectText([it.grid], out); }
     if (b.blocks) collectText(b.blocks, out);
   }
 }
@@ -312,11 +315,13 @@ for (const n of NS) {
     // 文字合规（用 n 个已知的代表例）
     if (rep && rep.ok) verifyDocText(n, mode, rep, 'known=' + n);
 
-    // 负例 1：矛盾输入（整盘填满但一格 +1 → 行和必然对不上）
+    // 负例 1：矛盾输入（整盘填满但一格 +1 → 行和必然对不上）。
+    //   none/integer 只可能报“矛盾”；classic/set 还可能先命中范围/份数校验
     {
       const m = new Map();
       for (let i = 0; i < N; i++) m.set(i, new Frac(trueSq[i] + (i === 0 ? 1 : 0)));
-      verifyNegative(n, mode, m, domain, '矛盾(满盘一格+1)', /矛盾|无解|范围|整数/);
+      verifyNegative(n, mode, m, domain, '矛盾(满盘一格+1)',
+        (mode === 'classic' || mode === 'set') ? /矛盾|范围|份数/ : /矛盾/);
     }
     // 负例 2：超范围（classic/set：已知数不在限定集合内）
     if (mode === 'classic' || mode === 'set') {
