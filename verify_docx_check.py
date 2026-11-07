@@ -13,9 +13,11 @@ MAX_XML = 20 * 1024 * 1024  # 20MB 上限
 
 
 def wellformed(xml):
-    """自实现的良构检查：标签配平、属性引号、无 DOCTYPE/ENTITY。不做任何实体解析。"""
-    if '<!DOCTYPE' in xml or '<!ENTITY' in xml or '&' in xml.replace('&amp;', '').replace('&lt;', '').replace('&gt;', '').replace('&quot;', '').replace('&apos;', ''):
-        return '含 DOCTYPE/ENTITY 或未预定义的实体引用'
+    """自实现的良构检查：标签配平、属性引号成对、拒绝 DOCTYPE/ENTITY/CDATA。不做任何实体解析。"""
+    if '<!DOCTYPE' in xml or '<!ENTITY' in xml or '<![CDATA[' in xml:
+        return '含 DOCTYPE/ENTITY/CDATA'
+    if '&' in xml.replace('&amp;', '').replace('&lt;', '').replace('&gt;', '').replace('&quot;', '').replace('&apos;', ''):
+        return '含未预定义的实体引用'
     n = len(xml)
     stack = []
     i = 0
@@ -24,16 +26,18 @@ def wellformed(xml):
         if lt < 0:
             break
         if xml.startswith('<?', lt) or xml.startswith('<!--', lt):
-            end = xml.find('>' if not xml.startswith('<!--', lt) else '-->', lt)
-            end = xml.find('-->', lt) if xml.startswith('<!--', lt) else xml.find('?>', lt)
+            is_comment = xml.startswith('<!--', lt)
+            end = xml.find('-->', lt) if is_comment else xml.find('?>', lt)
             if end < 0:
                 return '未闭合的处理指令/注释'
-            i = end + (3 if xml.startswith('<!--', lt) else 2)
+            i = end + (3 if is_comment else 2)
             continue
         end = xml.find('>', lt)
         if end < 0:
             return '未闭合的标签'
         tag = xml[lt + 1:end]
+        if tag.count('"') % 2 != 0:
+            return '属性引号不成对'
         selfclose = tag.endswith('/')
         if selfclose:
             tag = tag[:-1]
