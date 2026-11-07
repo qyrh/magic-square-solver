@@ -173,7 +173,10 @@
     return xml;
   }
   function captionPara(segs) {
-    return para(segs.map(function (s) { return runXml({ text: s.text, cls: 'dim' }, SZ(17)); }).join(''), { spacing: 120 });
+    // 保留生产端的 cls/b（如画块图注的 err+加粗）；缺省才用 dim
+    return para(segs.map(function (s) {
+      return runXml({ text: s.text, cls: s.cls || 'dim', b: s.b }, SZ(17));
+    }).join(''), { spacing: 120 });
   }
   function tableXml(block) {
     const ncol = Math.max(1, block.head.length);
