@@ -99,7 +99,7 @@
     const blueStr = blueOnly.length ? blueOnly.map(function (e) { return (e.count > 1 ? e.count + '·' : '') + model.letters[e.cell]; }).join(' + ') : '0';
     return {
       redLines: redLines, blueLines: blueLines, kRed: redLines.length, kBlue: blueLines.length,
-      cells: cells, redStr: redStr, blueStr: blueStr,
+      cells: cells, redStr: redStr, blueStr: blueStr, corner: corner,
       cancelledNames: cancelled.map(function (e) { return model.letters[e.cell]; }).join('、')
     };
   }
@@ -202,14 +202,14 @@
     const model = result.model, n = result.n;
     const info = step.cspInfo;
     const bl = [];
-    bl.push(H2('第 ' + step.i + ' 步　穷举验证：在限定数字范围内所有合法填法都相同'));
+    bl.push(H2('第 ' + step.i + ' 步　穷举验证：这些格子在所有合法填法中都取相同的值'));
     const names = info.extras.map(function (e) { return e.label + ' = ' + e.valueStr; }).join('，');
     bl.push(P(B('结论：'), S('在「' + (result.domain ? result.domain.note : '限定数字') + '」的全部合法填法中，'), B(names),
-      S(' —— 这几个格子在**所有**填法里都取同一个值，所以它们也是确定的（自动填入）。')));
+      S(' —— 这几个格子在任何一种合法填法里都取同一个值，所以它们也是确定的（自动填入）。')));
     const proofBlocks = [];
     proofBlocks.push(P(S('做法：把限定范围内的数字各用一次，逐个格子试填，并始终要求每条行、列、对角线的和都等于 S = ' +
       (result.domain && result.domain.S ? result.domain.S : '?') + '。对所有分支穷尽搜索后，共得到 '), B(info.count + ' 种'), S('合法填法（没有遗漏）。')));
-    proofBlocks.push(P(S('既然每种合法填法里这些格子都等于同一个数，那么把它们填成别的数就**无解**——它们就是确定解。这就是“为什么某个格子能确定”的完整证明。')));
+    proofBlocks.push(P(S('既然每种合法填法里这些格子都等于同一个数，那么把它们填成别的数就无解——它们就是确定解。这就是“为什么某个格子能确定”的完整证明。')));
     if (info.samples && info.samples.length > 0) {
       proofBlocks.push(P(S('下面是穷举得到的若干种填法（可以看到这些格子在各填法中都相同）：')));
       for (let q = 0; q < info.samples.length; q++) {
@@ -274,7 +274,8 @@
         S('；'), B('蓝组 = 全部 ' + kg.blueLines.length + ' 条行线（' + blueNames + '，正好覆盖整个方阵）'), S('。')));
       pb.push(P(S('红组有 ' + kg.kRed + ' 条线，和 = ' + kg.kRed + '·S = ' + kg.kRed + 'S；蓝组也是 ' + kg.kBlue + ' 条线，和 = ' + kg.kBlue + 'S。两组相等。')));
       pb.push(GRID(model.n, kg.cells, [S('红组多出的格子 = ', { cls: 'err', b: 1 }), S('蓝组多出的格子', { cls: 'given', b: 1 }), S('（灰点 = 两组重合、已抵消）')]));
-      pb.push(P(S('看重合部分：两组都包含的格子（' + kg.cancelledNames + '）在两边各出现同样的次数，互相抵消；红色行线在两边都有，也先抵消。抵消后剩下：'),
+      pb.push(P(S('看重合部分：先抵消两边都有的那条行线；其余两组都包含的格子（' + kg.cancelledNames +
+        '）按两边中较少的次数成对抵消（角格 ' + model.letters[kg.corner] + ' 在红组出现 3 次、蓝组 1 次，抵消 1 次后红组还剩 2 个 ' + model.letters[kg.corner] + '）。抵消后剩下：'),
         B(kg.redStr, { cls: 'err' }), S('（红组）与 '), B(kg.blueStr, { cls: 'given' }), S('（蓝组）。')));
       pb.push(P(S('所以 '), B(kg.redStr + ' = ' + kg.blueStr), S('，即 '), B(identityStr(step)), S('。∎')));
     } else {
@@ -322,7 +323,7 @@
         else if (blueSet.has(i)) cells.push({ text: regionCellStr(model, { cell: i, count: blueSet.get(i) }), kind: 'blue' });
         else cells.push({ text: '·', kind: 'dot' });
       }
-      pb.push(P(S('看重合部分：两组都出现的格子（' + (cancelled.length ? cancelled.map(function (e) { return model.letters[e.cell]; }).join('、') : '无') + '）在两边出现次数相同，互相抵消、去掉。剩下：')));
+      pb.push(P(S('看重合部分：两组都出现的格子（' + (cancelled.length ? cancelled.map(function (e) { return model.letters[e.cell]; }).join('、') : '无') + '）按两边中较少的次数成对抵消、去掉。剩下：')));
       pb.push(GRID(model.n, cells, [S('红组多出的格子', { cls: 'err', b: 1 }), S(' 与 '), S('蓝组多出的格子', { cls: 'given', b: 1 }), S('（“2·a”表示 a 出现 2 次；灰点 = 已抵消或未用到）')]));
       const redStr = redOnly.length ? redOnly.map(function (e) { return (e.count > 1 ? e.count + '·' : '') + model.letters[e.cell]; }).join(' + ') : '0';
       const blueStr = blueOnly.length ? blueOnly.map(function (e) { return (e.count > 1 ? e.count + '·' : '') + model.letters[e.cell]; }).join(' + ') : '0';
@@ -413,7 +414,7 @@
             function (idx) { return givSet.has(idx) ? 'given' : (stableSet.has(idx) ? 'derived' : 'diff'); },
             '示例 ' + (items.length + 1) + '：限定范围内的合法填法 ' + (q + 1) + ' / ' + c.count +
             (c.exhaustive ? '' : '（已找到的部分填法，未穷尽）') +
-            '。红色 = 各填法间取值不同的格子，绿色 = 每种填法里都相同（即穷举证明的确定解）');
+            '。红色 = 各填法间取值不同的格子，绿色 = ' + (c.exhaustive ? '每种填法里都相同（即穷举证明的确定解）' : '已找到的填法里都相同（未穷尽，不作为“确定”的证明）'));
         }
       }
       return items.length ? { t: 'examples', n: n, items: items } : null;
@@ -489,7 +490,7 @@
       if (result.domain.S) {
         bl.push(P(S('由限定「' + result.domain.note + '」，全部数字之和 = ' + result.domain.total + '，' + n + ' 条行线恰好覆盖全部格子一次，所以 ' + n + '·S = ' + result.domain.total + '，即 '), B('S = ' + result.domain.S), S('（第 1 步已证）。')));
         if (n >= 5 && !result.complete) {
-          bl.push(P(S('说明：' + n + ' 阶及以上不做限定范围内的穷举（规模过大），下面标为“无法唯一确定”的格子仅指**线性推导**无法确定；在限定值域下其中个别格子仍可能被确定。', { cls: 'dim' })));
+          bl.push(P(S('说明：' + n + ' 阶及以上不做限定范围内的穷举（规模过大），下面标为“无法唯一确定”的格子仅指线性推导无法确定；在限定值域下其中个别格子仍可能被确定。', { cls: 'dim' })));
         }
       } else if (result.domain.kind === 'integer') {
         bl.push(P(S('限定“只允许整数”：解出的每个数都必须是整数。')));
