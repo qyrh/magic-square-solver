@@ -27,6 +27,13 @@
     if (!isFinite(x) || !Number.isInteger(x) || Math.abs(x) > 4503599627370496) throw new Error(OVERFLOW_MSG);
     return x;
   }
+  /** 整数乘积：≤2^53 时精确（IEEE 正确舍入到整数）；超出则立即报错而不是静默舍入。
+   *  曾有反例：Frac(p,3).sub(Frac(q,3)) 的中间积 p*3=2^53+1 被舍入成 2^53，静默算错。 */
+  function mulExact(a, b) {
+    const p = a * b;
+    if (Math.abs(p) > 9007199254740992) throw new Error(OVERFLOW_MSG);
+    return p;
+  }
   function gcd(a, b) {
     if (a < 0) a = -a;
     if (b < 0) b = -b;
@@ -57,10 +64,27 @@
     }
     isZero() { return this.n === 0; }
     isNeg() { return this.n < 0; }
-    add(b) { b = Frac.from(b); return new Frac(this.n * b.d + b.n * this.d, this.d * b.d); }
-    sub(b) { b = Frac.from(b); return new Frac(this.n * b.d - b.n * this.d, this.d * b.d); }
-    mul(b) { b = Frac.from(b); return new Frac(this.n * b.n, this.d * b.d); }
-    div(b) { b = Frac.from(b); if (b.n === 0) throw new Error('除以 0'); return new Frac(this.n * b.d, this.d * b.n); }
+    add(b) {
+      b = Frac.from(b);
+      if (this.d === b.d) return new Frac(this.n + b.n, this.d);   // 同分母：精确快速路径
+      return new Frac(mulExact(this.n, b.d) + mulExact(b.n, this.d), mulExact(this.d, b.d));
+    }
+    sub(b) {
+      b = Frac.from(b);
+      if (this.d === b.d) return new Frac(this.n - b.n, this.d);
+      return new Frac(mulExact(this.n, b.d) - mulExact(b.n, this.d), mulExact(this.d, b.d));
+    }
+    mul(b) {
+      b = Frac.from(b);
+      const g1 = gcd(this.n, b.d), g2 = gcd(b.n, this.d);   // 乘前约分，尽量压小中间积
+      return new Frac(mulExact(this.n / g1, b.n / g2), mulExact(this.d / g2, b.d / g1));
+    }
+    div(b) {
+      b = Frac.from(b);
+      if (b.n === 0) throw new Error('除以 0');
+      const g1 = gcd(this.n, b.n), g2 = gcd(this.d, b.d);
+      return new Frac(mulExact(this.n / g1, b.d / g2), mulExact(this.d / g2, b.n / g1));
+    }
     neg() { return new Frac(-this.n, this.d); }
     equals(b) { b = Frac.from(b); return this.n === b.n && this.d === b.d; }
     toNumber() { return this.n / this.d; }
@@ -107,7 +131,9 @@
     if (c5 > k) k = c5;
     const mult = Math.pow(2, k - c2) * Math.pow(5, k - c5);   // = 10^k / f.d，整数
     const num = f.n * mult;
-    if (!isFinite(num) || Math.abs(num) > 4503599627370496) return null;   // 超精确范围：退回分数显示
+    // 上限 10^15−1：保证小数形式 ≤15 位有效数字，能被 parseDec 的 15 位限制无损读回
+    // （曾因上限 2^52 可产出 16 位小数，回读抛“有效数字过多”）
+    if (!isFinite(num) || Math.abs(num) > 999999999999999) return null;   // 超界：退回分数显示
     let s = String(num);
     const neg = s[0] === '-';
     if (neg) s = s.slice(1);
@@ -318,7 +344,8 @@
       return { key: 'corner4', name: '四角和定理（四阶）' };
     if (n % 2 === 1) {
       const ng = gamma * n;
-      if (k === model.center && hasS && cells.length === 0 && alphaMap.get(SC) === ng)
+      // 中心 = S/n：目标=中心、前提={S} 时 α_S·n = γ（原条件误写成 α_S = γ·n，恒不成立，死分支）
+      if (k === model.center && hasS && cells.length === 0 && alphaMap.get(SC) * n === gamma)
         return { key: 'center-S', name: '中心定理（奇数阶）' };
       if (k === SC && !hasS && cells.length === 1 && cells[0] === model.center && alphaMap.get(cells[0]) === ng)
         return { key: 'center-S', name: '中心定理（奇数阶）' };
@@ -436,6 +463,15 @@
         }
       }
       if (found && found.length) return { d: size, Cs: found };
+    }
+
+    // 回退前短路：若“补线法/整线求 S”（tech=1）直接可用，则该目标择优时恒胜，
+    // 无须再做全量系数解 + 贪心收缩（近满盘大阶曾在此耗时 1–2s）
+    {
+      const kset = new Map();
+      for (const c of knownArr) kset.set(c, F1);
+      const direct = target !== model.SC ? lineCompletionIdentity(model, target, kset) : sLineIdentity(model, kset);
+      if (direct) return { d: direct.alphaMap.size, Cs: [Array.from(direct.alphaMap.keys())] };
     }
 
     // 回退：解出全部已知坐标上的组合系数，再贪心收缩支撑集
@@ -783,22 +819,25 @@
       for (const li of cellLines[cell]) { lineSum[li] = lineSum[li].sub(v); lineLeft[li] += 1; }
     }
 
-    function availSorted() {
-      const out = [];
-      for (const e of cnt) {
-        if (e[1] <= 0) continue;
-        const v = val.get(e[0]);
-        for (let q = 0; q < e[1]; q++) out.push(v);
-      }
-      out.sort(function (a, b) { return a.toNumber() - b.toNumber(); });
-      return out;
-    }
+    // 预排序 distinct 值（升序；近增值已在 buildDomain 拒绝，double 序 = 精确序）。
+    // bounds 直接从两端按份数取值，O(D) 无排序——原实现每次全量展开+排序是节点扩展的主导开销。
+    const dPairs = [];
+    for (const e of cnt) dPairs.push({ k: e[0], v: val.get(e[0]) });
+    dPairs.sort(function (a, b) { return a.v.toNumber() - b.v.toNumber(); });
     function bounds(k) {
-      const arr = availSorted();
-      if (arr.length < k) return null;
-      let mn = new Frac(0), mx = new Frac(0);
-      for (let i = 0; i < k; i++) mn = mn.add(arr[i]);
-      for (let i = arr.length - k; i < arr.length; i++) mx = mx.add(arr[i]);
+      if (k <= 0) return [F0, F0];
+      let rem = k, mn = F0;
+      for (let i = 0; i < dPairs.length && rem > 0; i++) {
+        const c = Math.min(rem, cnt.get(dPairs[i].k) || 0);
+        if (c > 0) { mn = mn.add(dPairs[i].v.mul(new Frac(c))); rem -= c; }
+      }
+      if (rem > 0) return null;
+      rem = k; let mx = F0;
+      for (let i = dPairs.length - 1; i >= 0 && rem > 0; i--) {
+        const c = Math.min(rem, cnt.get(dPairs[i].k) || 0);
+        if (c > 0) { mx = mx.add(dPairs[i].v.mul(new Frac(c))); rem -= c; }
+      }
+      if (rem > 0) return null;
       return [mn, mx];
     }
 
@@ -860,13 +899,9 @@
       if (cell < 0) { exhaustive = false; stop = true; return; }
 
       const cands = [];
-      const seen = new Set();
-      for (const e of cnt) {
-        if (e[1] <= 0 || seen.has(e[0])) continue;
-        seen.add(e[0]);
-        cands.push(val.get(e[0]));
+      for (let i = 0; i < dPairs.length; i++) {
+        if ((cnt.get(dPairs[i].k) || 0) > 0) cands.push(dPairs[i].v);
       }
-      cands.sort(function (a, b) { return a.toNumber() - b.toNumber(); });
 
       for (const v of cands) {
         const mark = trail.length;
@@ -946,19 +981,24 @@
     if (m === 0) {
       if (part.every(isInt)) found = part.slice(0, N + 1);
     } else if (Math.pow(L, m) <= 300000) {
-      // 精确：枚举 t ∈ [0,L)^m
+      // 精确：枚举 t ∈ [0,L)^m（带时间护栏：超时退化为“未找到”，不误称无解）
       const t = new Array(m).fill(0);
+      const tF = new Array(m).fill(F1);   // t[j] 的 Frac 缓存，避免最内层重复分配
       let done = false;
+      const t0 = Date.now();
       while (!done) {
+        if (Date.now() - t0 > 1000) { exact = false; break; }
         const x = part.slice(0, N + 1);
         for (let j = 0; j < m; j++) {
           if (!t[j]) continue;
-          for (let i = 0; i <= N; i++) x[i] = x[i].add(D[j][i].mul(new Frac(t[j])));
+          const dj = D[j], tf = tF[j];
+          for (let i = 0; i <= N; i++) x[i] = x[i].add(dj[i].mul(tf));
         }
         if (x.every(isInt)) { found = x; break; }
         let j = 0;
         while (j < m) { t[j]++; if (t[j] < L) break; t[j] = 0; j++; }
         if (j === m) done = true;
+        for (j = 0; j < m; j++) tF[j] = new Frac(t[j]);
       }
     } else {
       // 规模过大：随机取样（只允许得出“未找到”，不得声称无解）
@@ -979,8 +1019,8 @@
       if (!exact) {
         return {
           feasible: null,
-          reason: '在“只允许整数”的限定下**未能找到**整数填法：规模过大（L = ' + L + '，自由参数 ' + m +
-            ' 个），只做了有限次随机尝试——这不构成“无解”的证明，仅供参考。',
+          reason: '在“只允许整数”的限定下未能找到整数填法：规模过大（L = ' + L + '，自由参数 ' + m +
+            ' 个），未能在时限内完成穷尽检查（只做了部分枚举/有限次随机尝试）——这不构成“无解”的证明，仅供参考。',
           witness: null
         };
       }
@@ -1004,8 +1044,7 @@
    * kind: 'none' | 'integer' | 'classic'（1…n² 各用一次）| 'set'（自定义 n² 个数各用一次）
    */
   function buildDomain(n, spec, givenMap) {
-    const model = buildModel(n);
-    const N = model.N, SC = model.SC;
+    const N = n * n, SC = N;   // 只需 N/SC，不重复构建完整模型（basis/u 白跑一遍）
     const kind = (spec && spec.kind) || 'none';
     const out = { kind: kind, S: null, multiset: null, distinct: false, labels: new Map(), note: null, total: null };
     if (kind === 'classic') {
@@ -1045,6 +1084,14 @@
         if (c <= 0) return { error: '已知数 ' + fmtNumber(e[1]) + ' 不在限定的数字范围内（或超出份数）。' };
         cnt.set(k, c - 1);
       }
+      // 近增值检测：两个**不同**的数转 double 后相同（分母 >2^26 量级的近分数）会让
+      // 穷举剪枝的排序与上下界不可靠（可能误剪掉真实解）——宁可明确拒绝
+      const vs = out.multiset.slice().sort(function (a, b) { return a.toNumber() - b.toNumber(); });
+      for (let i = 1; i < vs.length; i++) {
+        if (vs[i].toNumber() === vs[i - 1].toNumber() && !vs[i].equals(vs[i - 1]))
+          return { error: '限定数字中存在过近的两个不同值（' + fmtNumber(vs[i - 1]) + ' 与 ' + fmtNumber(vs[i]) +
+            '），超出安全穷举精度，请调整数字。' };
+      }
     }
     return out;
   }
@@ -1054,7 +1101,13 @@
     const model = buildModel(n);
     const N = model.N, SC = model.SC;
     const givensAll = new Map(givenMap);
-    if (domainInfo && domainInfo.S) givensAll.set(SC, domainInfo.S);
+    if (domainInfo && domainInfo.S) {
+      // 调用方显式给了 S 且与值域推出的不一致 → 矛盾（而不是静默覆盖）
+      if (givensAll.has(SC) && !givensAll.get(SC).equals(domainInfo.S))
+        return { error: '已知数中的幻和 S = ' + fmtNumber(givensAll.get(SC)) + ' 与值域限定推出的 S = ' +
+          fmtNumber(domainInfo.S) + ' 不一致（互相矛盾）。' };
+      givensAll.set(SC, domainInfo.S);
+    }
 
     const rows = model.lineRows.map(function (r) { const s = r.slice(); s.push(F0); return s; });
     for (const e of givensAll) {
@@ -1261,13 +1314,21 @@
         const lim = opts.cspLimits || (n <= 3
           ? { maxSolutions: 200, maxNodes: 160000, maxMs: 900 }
           : { maxSolutions: 1000, maxNodes: 400000, maxMs: 1500 });
-        csp = solveCSP(prep.model, prep.givensAll, domainInfo.multiset, domainInfo.S, lim);
+        try {
+          csp = solveCSP(prep.model, prep.givensAll, domainInfo.multiset, domainInfo.S, lim);
+        } catch (e) {
+          return { ok: false, n: n, error: '限定数字过大，超出精确穷举范围：' + e.message };
+        }
         if (csp.error) return { ok: false, n: n, error: csp.error };
       }
     }
     let integerInfo = null;
     if (domainInfo.kind === 'integer') {
-      integerInfo = checkIntegerSolutions(prep);
+      try {
+        integerInfo = checkIntegerSolutions(prep);
+      } catch (e) {
+        return { ok: false, n: n, error: '数字过大，超出整数性精确检查范围：' + e.message };
+      }
       if (integerInfo.feasible === false) return { ok: false, n: n, error: integerInfo.reason };
     }
 
@@ -1303,13 +1364,21 @@
       const lim = opts.cspLimits || (n <= 3
         ? { maxSolutions: 200, maxNodes: 160000, maxMs: 900 }
         : { maxSolutions: 1000, maxNodes: 400000, maxMs: 1500 });
-      csp = solveCSP(prep.model, prep.givensAll, domainInfo.multiset, domainInfo.S, lim);
+      try {
+        csp = solveCSP(prep.model, prep.givensAll, domainInfo.multiset, domainInfo.S, lim);
+      } catch (e) {
+        return { ok: false, n: n, error: '限定数字过大，超出精确穷举范围：' + e.message };
+      }
       if (csp.error) return { ok: false, n: n, error: csp.error };
       await sleep0();
     }
     let integerInfo = null;
     if (domainInfo.kind === 'integer') {
-      integerInfo = checkIntegerSolutions(prep);
+      try {
+        integerInfo = checkIntegerSolutions(prep);
+      } catch (e) {
+        return { ok: false, n: n, error: '数字过大，超出整数性精确检查范围：' + e.message };
+      }
       if (integerInfo.feasible === false) return { ok: false, n: n, error: integerInfo.reason };
       await sleep0();
     }
