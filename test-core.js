@@ -50,6 +50,38 @@ eq(Core.fmtNumber(Core.parseNumberString('.00000014789577')), '0.00000014789577'
   try { new Frac(2.5); } catch (e) { threw++; }
   ok(threw === 3, 'Frac 拒绝 NaN/Infinity/非整数（不挂起）');
 }
+// Frac 中间积精确性回归：同分母大数减法曾静默算错（p*3 = 2^53+1 被舍入成 2^53 → 8/9 ≠ 1）
+eq(new Frac(3002399751580331, 3).sub(new Frac(3002399751580328, 3)).toString(), '1', '同分母大数 sub 精确（审查反例）');
+// exactDecimal 上限收紧回归：16 位有效数字的小数改为退回分数显示，保证 parse 可无损读回
+{
+  const x = Core.parseNumberString('250000000000001/25');
+  eq(Core.fmtNumber(x), '250000000000001/25', '超 15 位有效数字退回分数显示');
+  ok(Core.parseNumberString(Core.fmtNumber(x)).equals(x), '分数显示可无损读回');
+}
+// 中心定理双向识别回归（分支 (a) 曾因常数取倒数成死分支：S 已知时中心步不标注）
+{
+  const r1 = solve(3, { 9: '15' });   // SC 坐标 = 9：已知 S=15
+  ok(r1.ok && r1.steps.length >= 1 && r1.steps[0].theorem && r1.steps[0].theorem.key === 'center-S',
+    '已知 S → 中心步识别为中心定理');
+  const r2 = solve(3, { 4: '5' });    // 已知中心 5
+  const sStep2 = r2.steps.find(s => s.isS);
+  ok(sStep2 && sStep2.theorem && sStep2.theorem.key === 'center-S', '已知中心 → S 步仍识别为中心定理');
+}
+// 近增值拒绝回归：两个不同数转 double 后相同（m=67114656 处碰撞）会让 CSP 剪枝不可靠
+{
+  const m = 67114656;
+  const vals = [new Frac(m + 1, m), new Frac(m + 2, m + 1)]
+    .concat(Array.from({ length: 7 }, (_, i) => new Frac(i + 3)));
+  const r = solve(3, {}, { kind: 'set', values: vals });
+  ok(!r.ok && /过近/.test(r.error), '限定数字过近（double 碰撞）被明确拒绝');
+}
+// 大分母限定数字：超出精确计算范围时 ok:false 而不是抛异常
+{
+  const vals = [new Frac(67500001, 67500000), new Frac(67500002, 67500001)]
+    .concat(Array.from({ length: 7 }, (_, i) => new Frac(i + 3)));
+  const r = solve(3, {}, { kind: 'set', values: vals });
+  ok(!r.ok && /超出精确/.test(r.error), '大分母限定数字优雅报错（不抛异常）');
+}
 
 /* ---------- 三阶：两个对角数 → 只能确定中心与幻和 ---------- */
 section('三阶：已知 a=1, i=9（仅两数）');
@@ -173,7 +205,7 @@ section('五阶：缅甸法（Siamese）幻方部分已知');
     if (r.finalCells[e.coord].valueStr !== String(sq[e.coord])) consistent = false;
   }
   ok(consistent, '所有已确定值与原幻方一致');
-  if (r.complete) ok(r.verification.rows.every(x => x.ok), '验证通过');
+  ok(!r.complete, '五阶 7 个已知不可能完整解（dimFree = n²−2n−7 = 8）');
 }
 
 /* ---------- 全部填满 ---------- */
@@ -241,6 +273,7 @@ section('值域限定：只允许整数');
   // 较大的已知数：按分母周期精确枚举，仍应找到整数解
   const r = solve(3, { 0: '100', 1: '200' }, { kind: 'integer' });
   ok(r.ok && r.integer.feasible === true, '大数已知也能判定存在整数解');
+  ok(r.examples && r.examples.length === 2, '大数示例存在（2 组，防静默不生成回归）');
   ok((r.examples || []).every(e => e.cells.every(v => !v.includes('/'))), '大数示例仍全为整数');
   // 每组示例的行和必须等于其标注的 S（沿整数方向平移时 S 会变，不能统一写见证的 S）
   (r.examples || []).forEach(ex => {
@@ -251,8 +284,8 @@ section('值域限定：只允许整数');
 }
 {
   const r = solve(3, { 0: '1' }, { kind: 'integer' });
-  const allInt = (r.sampling && r.sampling.samples || []).every(s => s.every(v => !v.includes('/')));
-  ok(r.ok && allInt, '仅 1 个已知数时试解也全为整数');
+  ok(r.ok && r.sampling && r.sampling.samples && r.sampling.samples.length > 0 &&
+    r.sampling.samples.every(s => s.every(v => !v.includes('/'))), '仅 1 个已知数时试解也全为整数（样本非空）');
 }
 
 section('值域限定：自定义集合');
