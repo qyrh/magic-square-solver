@@ -62,12 +62,13 @@
   .blk-h2 { font-size: 17.5px; font-weight: 700; margin: 14px 0 6px; color: #1d2f52; border-left: 4px solid #2b5fd9; padding-left: 8px; }
   .blk-h3 { font-size: 15px; font-weight: 700; margin: 12px 0 4px; color: #333c4e; }
   .blk-p { margin: 6px 0; font-size: 14.5px; }
-  .blk-p .given { color: var(--given); font-weight: 600; }
-  .blk-p .derived { color: var(--derived); font-weight: 600; }
-  .blk-p .new { color: #9a6700; font-weight: 700; }
-  .blk-p .ok { color: var(--derived); }
-  .blk-p .err { color: var(--err); }
-  .blk-p .dim { color: var(--dim); }
+  /* 语义色：正文段、表格单元格、图注共用（原先只作用于 .blk-p，验证表 ✗/图注红色会丢） */
+  .given { color: var(--given); font-weight: 600; }
+  .derived { color: var(--derived); font-weight: 600; }
+  .new { color: #9a6700; font-weight: 700; }
+  .ok { color: var(--derived); }
+  .err { color: var(--err); }
+  .dim { color: var(--dim); }
   .blk-p b { font-weight: 700; }
 
   /* ---------- 证明区网格：正方形 + 尺寸随数字自适应 ---------- */
@@ -245,9 +246,9 @@
   </section>
 </div>
 
-<script src="magic-core.js?v=24"></script>
-<script src="render.js?v=24"></script>
-<script src="docx.js?v=24"></script>
-<script src="app.js?v=24"></script>
+<script src="magic-core.js?v=25"></script>
+<script src="render.js?v=25"></script>
+<script src="docx.js?v=25"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
