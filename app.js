@@ -61,6 +61,7 @@
   }
   /* 把“能确定的数”回填到填写框；不再可定的自动清除 */
   function autofillDerived(result) {
+    if (result.finalCells.length !== state.grid.values.length) return;   // 阶数已变：丢弃过期结果
     const inputs = $('gridBox').querySelectorAll('input');
     for (let i = 0; i < result.finalCells.length; i++) {
       const fc = result.finalCells[i];
@@ -105,6 +106,7 @@
 
   function buildInputs(n) {
     state.n = n;
+    state.token += 1;   // 网格身份改变：作废一切在途求解（防止旧结果的回填写到新网格上越界）
     state.grid.values = new Array(n * n).fill('');
     state.grid.derived = new Array(n * n).fill(false);
     state.history = []; state.redoStack = []; state.lastHist = null;
@@ -211,7 +213,10 @@
   function scheduleAuto(delay) {
     if (!$('autoSolve').checked) return;
     clearTimeout(state.autoT);
-    state.autoT = setTimeout(function () { solve({ auto: true }); }, delay === 0 ? 0 : 650);
+    state.autoT = setTimeout(function () {
+      if (!$('autoSolve').checked) return;   // 排队期间取消勾选则不再触发
+      solve({ auto: true });
+    }, delay === 0 ? 0 : 650);
   }
 
   /* ---------------- 预置示例 ---------------- */
@@ -239,12 +244,11 @@
     let idxs = Array.from({ length: model.N }, function (_, i) { return i; });
     for (let i = idxs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = idxs[i]; idxs[i] = idxs[j]; idxs[j] = t; }
     let keep = idxs.slice();
-    let cnt = 0;
     for (const i of idxs) {
       const trial = keep.filter(function (x) { return x !== i; });
       const det = MagicCore.determinedSetForCoords(model, trial);
       if (det.length === model.N + 1) keep = trial;
-      if (++cnt % 3 === 0) await new Promise(function (r) { setTimeout(r, 0); });
+      await new Promise(function (r) { setTimeout(r, 0); });   // 每格让出一次（大阶单次要几十 ms）
     }
     const out = new Array(model.N).fill(null);
     for (const i of keep) out[i] = MagicCore.fmtNumber(cells[i]);
@@ -258,14 +262,19 @@
         const n = Number($('selN').value);
         buildInputs(n);
         btn.disabled = true; btn.textContent = '生成中…';
-        const vals = await randomPuzzle(n);
-        pushHistory();
-        setGrid(vals);
-        btn.disabled = false; btn.textContent = '随机出题';
+        try {
+          const vals = await randomPuzzle(n);
+          if (state.n !== n) return;   // 生成期间切了阶数：丢弃本次结果
+          pushHistory();
+          setGrid(vals);
+        } finally {
+          btn.disabled = false; btn.textContent = '随机出题';
+        }
       } else {
         const p = PRESETS[key];
         $('selN').value = String(p.n);
         buildInputs(p.n);
+        syncDomainUI();   // 程序化改 selN 不触发 change，需手动刷新限定集合提示
         pushHistory();
         setGrid(p.cells);
       }
@@ -294,16 +303,21 @@
     const lines = $('batchText').value.trim().split(/\n+/).filter(Boolean);
     if (!lines.length) return;
     const n = lines.length;
-    if (n > 8) { $('inputErr').textContent = '批量输入最多支持 8 阶。'; return; }
+    if (n < 3 || n > 8) { $('inputErr').textContent = '批量输入需要 3–8 行（每行 n 个数，n 为阶数）。'; return; }
     $('selN').value = String(n);
     buildInputs(n);
+    syncDomainUI();   // 阶数可能变了：刷新限定集合提示/预填
     const vals = new Array(n * n).fill('');
+    let shortRows = 0;
     lines.forEach(function (line, r) {
-      line.split(/[\s,，;；]+/).filter(function (x) { return x !== ''; }).forEach(function (tok, c) {
+      const toks = line.split(/[\s,，;；]+/).filter(function (x) { return x !== ''; });
+      if (toks.length !== n) shortRows++;
+      toks.forEach(function (tok, c) {
         if (c >= n || r >= n) return;
         vals[r * n + c] = (tok === '-' || tok === '.') ? '' : tok;
       });
     });
+    if (shortRows) $('inputErr').textContent = '注意：有 ' + shortRows + ' 行的数字个数不等于 ' + n + '，多余的被忽略、缺的按未知处理。';
     pushHistory();
     setGrid(vals);
   });
@@ -635,6 +649,7 @@
       box.appendChild(div);
       if (i % 2 === 1) await new Promise(function (r) { setTimeout(r, 0); });
     }
+    $('btnProofs').textContent = '📖 展开全部证明';   // 新渲染的证明默认折叠：按钮标签同步复位
     applyMode();
   }
   function applyMode() {
@@ -665,6 +680,7 @@
   });
   window.addEventListener('beforeprint', function () {
     document.querySelectorAll('#pages details.proof-details').forEach(function (d) { d.open = true; });
+    $('btnProofs').textContent = '📕 折叠全部证明';   // 打印强制展开：标签同步
   });
 
   /* ---------------- 点击查阅：这个数根据哪几个数推出 ---------------- */
@@ -731,10 +747,15 @@
       if (m) m.remove();
       return;
     }
+    // 批量文本 / 限定数字输入框里：把 Ctrl+Z/Y 留给文本框的原生撤回，不撤幻方格子
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y')) {
+      const t = e.target;
+      if (t && (t.id === 'batchText' || t.id === 'customSet')) return;
+    }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undoGrid(); return; }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redoGrid(); return; }
     if ($('result').style.display === 'none' || state.mode !== 'step') return;
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
     if (e.key === 'ArrowRight' || e.key === 'PageDown') $('btnNext').click();
     if (e.key === 'ArrowLeft' || e.key === 'PageUp') $('btnPrev').click();
   });
